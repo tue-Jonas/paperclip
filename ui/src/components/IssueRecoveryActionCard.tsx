@@ -37,8 +37,8 @@ export interface IssueRecoveryActionCardProps {
   forcedState?: RecoveryCardCardState;
   /** Optional click handler for resolve menu actions. If omitted, the buttons are not rendered. */
   onResolve?: (outcome: RecoveryResolveOutcome) => void;
-  /** Whether the viewer can run destructive board-only actions (e.g. cancel recovery). */
-  canCancelRecovery?: boolean;
+  /** Whether the viewer can run destructive board-only actions (e.g. false-positive dismissal). */
+  canFalsePositive?: boolean;
   className?: string;
 }
 
@@ -323,7 +323,7 @@ export function IssueRecoveryActionCard({
   agentMap,
   forcedState,
   onResolve,
-  canCancelRecovery = false,
+  canFalsePositive = false,
   className,
 }: IssueRecoveryActionCardProps) {
   const cardState: RecoveryCardCardState = forcedState ?? deriveRecoveryCardState(action);
@@ -364,7 +364,7 @@ export function IssueRecoveryActionCard({
 
   const showResolveActions = onResolve !== undefined && cardState !== "resolved";
   const visibleResolveOptions = RESOLVE_OPTIONS.filter((option) => {
-    if (option.boardOnly && !canCancelRecovery) return false;
+    if (option.boardOnly && !canFalsePositive) return false;
     return true;
   });
 

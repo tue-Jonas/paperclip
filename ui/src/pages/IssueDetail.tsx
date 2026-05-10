@@ -615,7 +615,7 @@ type IssueDetailChatTabProps = {
   successfulRunHandoff: Issue["successfulRunHandoff"] | null;
   recoveryAction: Issue["activeRecoveryAction"];
   onResolveRecoveryAction?: (outcome: import("../components/IssueRecoveryActionCard").RecoveryResolveOutcome) => void;
-  canCancelRecoveryAction?: boolean;
+  canFalsePositiveRecoveryAction?: boolean;
   legacyRecoverySourceIssue?: {
     identifier: string | null;
     href: string;
@@ -686,7 +686,7 @@ const IssueDetailChatTab = memo(function IssueDetailChatTab({
   successfulRunHandoff,
   recoveryAction,
   onResolveRecoveryAction,
-  canCancelRecoveryAction,
+  canFalsePositiveRecoveryAction,
   legacyRecoverySourceIssue,
   comments,
   locallyQueuedCommentRunIds,
@@ -896,7 +896,7 @@ const IssueDetailChatTab = memo(function IssueDetailChatTab({
         successfulRunHandoff={successfulRunHandoff}
         recoveryAction={recoveryAction ?? null}
         onResolveRecoveryAction={onResolveRecoveryAction}
-        canCancelRecoveryAction={canCancelRecoveryAction}
+        canFalsePositiveRecoveryAction={canFalsePositiveRecoveryAction}
         legacyRecoverySourceIssue={legacyRecoverySourceIssue ?? null}
         companyId={companyId}
         projectId={projectId}
@@ -3887,7 +3887,7 @@ export function IssueDetail() {
               successfulRunHandoff={issue.successfulRunHandoff ?? null}
               recoveryAction={issue.activeRecoveryAction ?? null}
               onResolveRecoveryAction={handleResolveRecoveryAction}
-              canCancelRecoveryAction={canResolveBoardRecoveryAction}
+              canFalsePositiveRecoveryAction={canResolveBoardRecoveryAction}
               legacyRecoverySourceIssue={legacyRecoverySourceIssue}
               comments={threadComments}
               locallyQueuedCommentRunIds={locallyQueuedCommentRunIds}

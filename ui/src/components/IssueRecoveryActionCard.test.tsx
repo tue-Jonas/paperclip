@@ -182,7 +182,7 @@ describe("IssueRecoveryActionCard", () => {
 
   it("does not offer blocked recovery resolution without a blocker selection flow", () => {
     const node = render(
-      <IssueRecoveryActionCard action={buildAction()} onResolve={() => {}} canCancelRecovery />,
+      <IssueRecoveryActionCard action={buildAction()} onResolve={() => {}} canFalsePositive />,
     );
     click(node.querySelector("[data-testid='recovery-action-resolve-trigger']"));
 
@@ -193,7 +193,7 @@ describe("IssueRecoveryActionCard", () => {
     expect(document.body.textContent).not.toContain("Mark blocked");
   });
 
-  it("hides false-positive options unless canCancelRecovery is set", () => {
+  it("hides false-positive options unless canFalsePositive is set", () => {
     const first = render(
       <IssueRecoveryActionCard action={buildAction()} onResolve={() => {}} />,
     );
@@ -207,7 +207,7 @@ describe("IssueRecoveryActionCard", () => {
 
     const onResolve = vi.fn();
     const second = render(
-      <IssueRecoveryActionCard action={buildAction()} onResolve={onResolve} canCancelRecovery />,
+      <IssueRecoveryActionCard action={buildAction()} onResolve={onResolve} canFalsePositive />,
     );
     click(second.querySelector("[data-testid='recovery-action-resolve-trigger']"));
     expect(document.body.textContent).toContain("False positive, done");

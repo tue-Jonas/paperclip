@@ -65,11 +65,11 @@ function buildAction(overrides: Partial<IssueRecoveryAction> = {}): IssueRecover
   };
 }
 
-function CardPanel({ caption, action, forcedState, canCancelRecovery }: {
+function CardPanel({ caption, action, forcedState, canFalsePositive }: {
   caption: string;
   action: IssueRecoveryAction;
   forcedState?: React.ComponentProps<typeof IssueRecoveryActionCard>["forcedState"];
-  canCancelRecovery?: boolean;
+  canFalsePositive?: boolean;
 }) {
   return (
     <section className="space-y-2">
@@ -81,7 +81,7 @@ function CardPanel({ caption, action, forcedState, canCancelRecovery }: {
         agentMap={storybookAgentMap}
         forcedState={forcedState}
         onResolve={() => {}}
-        canCancelRecovery={canCancelRecovery}
+        canFalsePositive={canFalsePositive}
       />
     </section>
   );
@@ -90,12 +90,12 @@ function CardPanel({ caption, action, forcedState, canCancelRecovery }: {
 function AllStatesPanel() {
   return (
     <div className="grid gap-5 lg:grid-cols-1">
-      <CardPanel caption="State 1 · Recovery needed (default)" action={buildAction()} canCancelRecovery />
+      <CardPanel caption="State 1 · Recovery needed (default)" action={buildAction()} canFalsePositive />
       <CardPanel
         caption="State 2 · Recovery in progress"
         action={buildAction({ outcome: "delegated", attemptCount: 2 })}
         forcedState="in_progress"
-        canCancelRecovery
+        canFalsePositive
       />
       <CardPanel
         caption="State 3 · Observing active run (watchdog)"
@@ -118,7 +118,7 @@ function AllStatesPanel() {
           },
           nextAction: "Board operator: assign an invokable owner or record a manual resolution.",
         })}
-        canCancelRecovery
+        canFalsePositive
       />
       <CardPanel
         caption="State 5 · Recovery resolved"

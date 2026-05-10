@@ -301,7 +301,7 @@ interface IssueChatThreadProps {
   successfulRunHandoff?: SuccessfulRunHandoffState | null;
   recoveryAction?: IssueRecoveryAction | null;
   onResolveRecoveryAction?: (outcome: RecoveryResolveOutcome) => void;
-  canCancelRecoveryAction?: boolean;
+  canFalsePositiveRecoveryAction?: boolean;
   legacyRecoverySourceIssue?: {
     identifier: string | null;
     href: string;
@@ -3621,7 +3621,7 @@ export function IssueChatThread({
   successfulRunHandoff = null,
   recoveryAction = null,
   onResolveRecoveryAction,
-  canCancelRecoveryAction = false,
+  canFalsePositiveRecoveryAction = false,
   legacyRecoverySourceIssue = null,
   companyId,
   projectId,
@@ -4263,7 +4263,7 @@ export function IssueChatThread({
                       action={recoveryAction}
                       agentMap={agentMap}
                       onResolve={onResolveRecoveryAction}
-                      canCancelRecovery={canCancelRecoveryAction}
+                      canFalsePositive={canFalsePositiveRecoveryAction}
                     />
                   ) : null}
                   {legacyRecoverySourceIssue ? (
