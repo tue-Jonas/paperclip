@@ -235,4 +235,22 @@ describe("ProjectWorkspaceDetail changes tab", () => {
       "/projects/paperclip-app/workspaces/workspace-1?tab=changes&diffView=head&baseRef=origin%2Fmain",
     );
   });
+
+  it("opens the Changes tab in working-tree mode when no upstream ref is known", async () => {
+    mockProjectsApi.get.mockResolvedValue(project({
+      workspaces: [projectWorkspace({ defaultRef: null, repoRef: null })],
+      primaryWorkspace: projectWorkspace({ defaultRef: null, repoRef: null }),
+      codebase: null,
+    }));
+
+    await render();
+
+    await act(async () => {
+      (container.querySelector('[data-tab-value="changes"]') as HTMLButtonElement).click();
+    });
+
+    expect(mockNavigate).toHaveBeenCalledWith(
+      "/projects/paperclip-app/workspaces/workspace-1?tab=changes&diffView=working-tree",
+    );
+  });
 });

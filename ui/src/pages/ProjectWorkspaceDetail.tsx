@@ -428,11 +428,11 @@ export function ProjectWorkspaceDetail() {
   const handleTabChange = (tab: ProjectWorkspaceTab) => {
     const workspacePath = projectWorkspaceUrl(project, routeWorkspaceId);
     if (tab === "changes") {
+      const baseRef = upstreamBaseRef(workspace);
       const params = new URLSearchParams({
         tab: "changes",
-        diffView: "head",
+        diffView: baseRef ? "head" : "working-tree",
       });
-      const baseRef = upstreamBaseRef(workspace);
       if (baseRef) params.set("baseRef", baseRef);
       navigate(`${workspacePath}?${params.toString()}`);
       return;
