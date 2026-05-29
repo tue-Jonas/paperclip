@@ -26,7 +26,7 @@ import type {
   PluginIssueOrchestrationSummary,
   PluginExecutionWorkspaceMetadata,
 } from "@paperclipai/plugin-sdk";
-import type { CreateIssueThreadInteraction, InviteJoinType, IssueDocumentSummary, PermissionKey, PrincipalType } from "@paperclipai/shared";
+import type { CreateIssueThreadInteraction, InviteJoinType, IssueDocumentSummary, IssueThreadInteraction, PermissionKey, PrincipalType } from "@paperclipai/shared";
 import { pluginOperationIssueOriginKind } from "@paperclipai/shared";
 import { companyService } from "./companies.js";
 import { agentService } from "./agents.js";
@@ -2000,7 +2000,7 @@ export function buildHostServices(
         if (!inCompany(await issues.getById(params.issueId), companyId)) return [];
         const all = await issueThreadInteractionService(db).listForIssue(params.issueId);
         const filtered = params.status ? all.filter((interaction) => interaction.status === params.status) : all;
-        return filtered as any;
+        return filtered as IssueThreadInteraction[];
       },
       async createComment(params) {
         const companyId = ensureCompanyId(params.companyId);
