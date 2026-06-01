@@ -569,6 +569,33 @@ export function createHostClientHandlers(
       );
     }
 
+    // No precise invocation id was echoed by the worker. The host supplied the
+    // set of currently-active company scopes instead. Allow a single-company
+    // request only when that company is itself an active scope; deny
+    // cross-company requests and all-company (`companies.list`) requests that
+    // cannot be satisfied by a specific active scope. This preserves
+    // cross-company isolation while letting same-company nested calls through.
+    const inferredScopes = context?.inferredCompanyScopes;
+    if (inferredScopes && inferredScopes.length > 0) {
+      if (requested.kind === "all") {
+        throw new InvocationScopeDeniedError(
+          pluginId,
+          method,
+          `the active invocation scope is limited to ${inferredScopes
+            .map((id) => `"${id}"`)
+            .join(", ")} and cannot service an all-company request`,
+        );
+      }
+      if (!inferredScopes.includes(requested.companyId)) {
+        throw new InvocationScopeDeniedError(
+          pluginId,
+          method,
+          `requested company "${requested.companyId}" is outside the active invocation scopes`,
+        );
+      }
+      return;
+    }
+
     const allowedCompanyId = readNonEmptyString(context?.invocationScope?.companyId);
     if (!allowedCompanyId) return;
 

@@ -151,6 +151,88 @@ describe("createHostClientHandlers invocation company scope", () => {
     },
   );
 
+  it("allows a no-invocation-id call when the requested company is an active scope", async () => {
+    const issuesGet = vi.fn(async () => ({ id: "issue-1" }));
+    const services = {
+      issues: { get: issuesGet },
+    } as unknown as HostServices;
+
+    const handlers = createHostClientHandlers({
+      pluginId: "paperclip.test",
+      capabilities: ["issues.read"],
+      services,
+    });
+
+    await expect(
+      handlers["issues.get"](
+        { companyId: "company-a", issueId: "issue-1" },
+        { inferredCompanyScopes: ["company-a"] },
+      ),
+    ).resolves.toEqual({ id: "issue-1" });
+    expect(issuesGet).toHaveBeenCalledTimes(1);
+  });
+
+  it("denies a no-invocation-id call for a company outside the active scopes", async () => {
+    const issuesGet = vi.fn(async () => ({ id: "issue-1" }));
+    const services = {
+      issues: { get: issuesGet },
+    } as unknown as HostServices;
+
+    const handlers = createHostClientHandlers({
+      pluginId: "paperclip.test",
+      capabilities: ["issues.read"],
+      services,
+    });
+
+    await expect(
+      handlers["issues.get"](
+        { companyId: "company-b", issueId: "issue-1" },
+        { inferredCompanyScopes: ["company-a"] },
+      ),
+    ).rejects.toBeInstanceOf(InvocationScopeDeniedError);
+    expect(issuesGet).not.toHaveBeenCalled();
+  });
+
+  it("denies an all-company (companies.list) call while a specific scope is active", async () => {
+    const companiesList = vi.fn(async () => [{ id: "company-a" }]);
+    const services = {
+      companies: { list: companiesList },
+    } as unknown as HostServices;
+
+    const handlers = createHostClientHandlers({
+      pluginId: "paperclip.test",
+      capabilities: ["companies.read"],
+      services,
+    });
+
+    await expect(
+      handlers["companies.list"]({}, { inferredCompanyScopes: ["company-a"] }),
+    ).rejects.toBeInstanceOf(InvocationScopeDeniedError);
+    expect(companiesList).not.toHaveBeenCalled();
+  });
+
+  it("allows an all-company (companies.list) call when no scope is active", async () => {
+    const companiesList = vi.fn(async () => [
+      { id: "company-a" },
+      { id: "company-b" },
+    ]);
+    const services = {
+      companies: { list: companiesList },
+    } as unknown as HostServices;
+
+    const handlers = createHostClientHandlers({
+      pluginId: "paperclip.test",
+      capabilities: ["companies.read"],
+      services,
+    });
+
+    await expect(handlers["companies.list"]({}, {})).resolves.toEqual([
+      { id: "company-a" },
+      { id: "company-b" },
+    ]);
+    expect(companiesList).toHaveBeenCalledTimes(1);
+  });
+
   it("checks invocation company scope before exposing authorization data", async () => {
     const searchAudit = vi.fn(async () => []);
     const services = {

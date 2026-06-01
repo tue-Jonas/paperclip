@@ -283,6 +283,17 @@ export interface PluginInvocationContext {
 export interface WorkerHostCallContext {
   invocationScope?: PluginInvocationScope | null;
   invalidInvocationScope?: boolean;
+  /**
+   * Company scopes of the currently-active host invocations, populated when a
+   * worker→host call does NOT echo a `paperclipInvocationId` (e.g. a worker SDK
+   * lineage that does not propagate invocation ids). The host cannot bind the
+   * call to one precise invocation, so it exposes the set of active company
+   * scopes; the capability layer allows same-company calls and denies
+   * cross-company or all-company (`companies.list`) mismatches. Cross-company
+   * isolation is preserved because a call only succeeds when its requested
+   * company is itself an active invocation scope.
+   */
+  inferredCompanyScopes?: readonly string[];
 }
 
 // ---------------------------------------------------------------------------

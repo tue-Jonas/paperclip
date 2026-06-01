@@ -275,7 +275,7 @@ describe("plugin-worker-manager stderr failure context", () => {
     }
   });
 
-  it("rejects performAction nested host calls that omit the invocation id", async () => {
+  it("rejects performAction nested host calls that omit the invocation id for a different company", async () => {
     const handlers = createHostClientHandlers({
       pluginId: "test.plugin",
       capabilities: ["companies.read"],
@@ -301,6 +301,9 @@ describe("plugin-worker-manager stderr failure context", () => {
     try {
       await handle.start();
 
+      // A nested call that omits the invocation id but targets a *different*
+      // company than the active invocation scope is still denied (cross-company
+      // isolation), now with the inferred-scope message.
       await expect(handle.call("performAction", {
         key: "probe",
         params: {
@@ -316,8 +319,67 @@ describe("plugin-worker-manager stderr failure context", () => {
         renderEnvironment: null,
       })).rejects.toMatchObject({
         code: PLUGIN_RPC_ERROR_CODES.INVOCATION_SCOPE_DENIED,
-        message: expect.stringContaining("unknown invocation scope"),
+        message: expect.stringContaining("outside the active invocation scopes"),
       });
+    } finally {
+      await handle.stop().catch(() => undefined);
+    }
+  });
+
+  it("allows nested host calls that omit the invocation id for the active company scope", async () => {
+    // Core robustness fix (TWX-88): a worker SDK lineage that does not propagate
+    // paperclipInvocationId must still be able to make same-company nested calls
+    // (e.g. the telegram plugin's issues.get inside issue.interaction.created).
+    // A direct host handler records the context the host derived for the no-id
+    // nested call so we can assert the inferred company scope is exposed.
+    const companiesGet = vi.fn(async (
+      params: { companyId: string },
+      context?: { inferredCompanyScopes?: readonly string[] },
+    ) => ({
+      id: params.companyId,
+      inferred: context?.inferredCompanyScopes ?? null,
+    }));
+    const handle = createPluginWorkerHandle("test.plugin", {
+      entrypointPath: INVOCATION_SCOPE_WORKER_ENTRYPOINT,
+      manifest: TEST_MANIFEST,
+      config: {},
+      instanceInfo: {
+        instanceId: "instance-1",
+        hostVersion: "1.0.0",
+      },
+      apiVersion: 1,
+      hostHandlers: {
+        "companies.get": companiesGet as never,
+      },
+    });
+
+    try {
+      await handle.start();
+
+      // performAction is scoped to company-a; the nested companies.get omits the
+      // invocation id but requests the same company-a → allowed, with the active
+      // company scope exposed as inferredCompanyScopes.
+      await expect(handle.call("performAction", {
+        key: "probe",
+        params: {
+          requestedCompanyId: "company-a",
+        },
+        actorContext: {
+          type: "agent",
+          userId: null,
+          agentId: "agent-1",
+          runId: "run-1",
+          companyId: "company-a",
+        },
+        renderEnvironment: null,
+      })).resolves.toEqual({
+        id: "company-a",
+        inferred: ["company-a"],
+      });
+      expect(companiesGet).toHaveBeenCalledWith(
+        { companyId: "company-a" },
+        { inferredCompanyScopes: ["company-a"] },
+      );
     } finally {
       await handle.stop().catch(() => undefined);
     }

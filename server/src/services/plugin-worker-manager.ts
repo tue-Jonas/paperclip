@@ -64,6 +64,17 @@ const DEFAULT_RPC_TIMEOUT_MS = 30_000;
 /** Hard upper bound for any RPC timeout (15 minutes). Prevents unbounded waits. */
 const MAX_RPC_TIMEOUT_MS = 15 * 60 * 1_000;
 
+/**
+ * TTL for the invocation registered around a fire-and-forget `notify`
+ * (e.g. `onEvent`) dispatch. Unlike `call()`, a notify has no response to
+ * clear its invocation, so it must self-expire. It needs to outlive the
+ * worker's synchronous nested worker→host calls made while handling the event,
+ * but stay short enough that a stale scope does not poison unrelated calls
+ * (e.g. the periodic `check-watches` job's `companies.list`). 60s comfortably
+ * covers a notification handler's nested calls while bounding the poison window.
+ */
+const NOTIFY_INVOCATION_TTL_MS = 60_000;
+
 /** Timeout for the initialize RPC call. */
 const INITIALIZE_TIMEOUT_MS = 15_000;
 
@@ -554,14 +565,31 @@ export function createPluginWorkerHandle(
     activeInvocations.delete(invocation.id);
   }
 
+  function activeCompanyScopeIds(): string[] {
+    const ids = new Set<string>();
+    for (const entry of activeInvocations.values()) {
+      const id = readNonEmptyString(entry.scope.companyId);
+      if (id) ids.add(id);
+    }
+    return Array.from(ids);
+  }
+
   function contextForWorkerMessage(message: JsonRpcRequest | JsonRpcNotification): WorkerHostCallContext {
     const invocationId = readNonEmptyString(
       (message as { paperclipInvocationId?: unknown }).paperclipInvocationId,
     );
     if (!invocationId) {
-      const hasActiveInvocation = activeInvocations.size > 0 ||
-        Array.from(pendingRequests.values()).some((pending) => pending.invocationId);
-      return hasActiveInvocation ? { invalidInvocationScope: true } : {};
+      // The worker did not echo a host invocation id. This happens with worker
+      // SDK lineages that do not propagate `paperclipInvocationId`. Rather than
+      // blanket-denying every company-scoped call whenever any invocation is
+      // active (which poisons unrelated calls — e.g. a lingering notify scope
+      // blocking `check-watches`), expose the set of active company scopes and
+      // let the capability layer allow same-company calls and deny
+      // cross-company / all-company mismatches. When nothing is active the call
+      // is treated as instance/global scoped and allowed.
+      const inferred = activeCompanyScopeIds();
+      if (inferred.length === 0) return {};
+      return { inferredCompanyScopes: inferred };
     }
     const entry = activeInvocations.get(invocationId);
     if (!entry) return { invalidInvocationScope: true };
@@ -674,13 +702,26 @@ export function createPluginWorkerHandle(
         );
         return;
       }
-      const allowedCompanyId = context.invocationScope?.companyId;
-      if (allowedCompanyId && companyId !== allowedCompanyId) {
-        log.warn(
-          { method: notification.method, companyId, allowedCompanyId },
-          "dropping plugin stream notification outside invocation company scope",
-        );
-        return;
+      const inferredScopes = context.inferredCompanyScopes;
+      if (inferredScopes && inferredScopes.length > 0) {
+        // No invocation id echoed: only forward when the stream's company is
+        // itself an active invocation scope (cross-company isolation).
+        if (!companyId || !inferredScopes.includes(companyId)) {
+          log.warn(
+            { method: notification.method, companyId, inferredScopes },
+            "dropping plugin stream notification outside active invocation scopes",
+          );
+          return;
+        }
+      } else {
+        const allowedCompanyId = context.invocationScope?.companyId;
+        if (allowedCompanyId && companyId !== allowedCompanyId) {
+          log.warn(
+            { method: notification.method, companyId, allowedCompanyId },
+            "dropping plugin stream notification outside invocation company scope",
+          );
+          return;
+        }
       }
 
       // Track open channels so we can emit synthetic close on crash
@@ -1257,7 +1298,7 @@ export function createPluginWorkerHandle(
     notify(method: string, params: unknown) {
       if (status !== "running") return;
       const invocationScope = deriveInvocationScope(method, params);
-      const invocation = invocationScope ? registerInvocation(invocationScope, MAX_RPC_TIMEOUT_MS) : null;
+      const invocation = invocationScope ? registerInvocation(invocationScope, NOTIFY_INVOCATION_TTL_MS) : null;
       try {
         sendMessage({
           jsonrpc: JSONRPC_VERSION,
