@@ -316,7 +316,21 @@ export interface HostClientFactoryOptions {
    * returned map delegates to the corresponding service method.
    */
   services: HostServices;
+
+  /**
+   * Policy for privileged/all-company worker→host calls when the worker omits
+   * `paperclipInvocationId` and the host must infer context from currently
+   * active invocations.
+   *
+   * - `compat` keeps legacy behavior.
+   * - `deny_mixed_all_company` rejects all-company requests in mixed
+   *   (system+company) or company-inferred mode. Pure system mode remains
+   *   allowed so scheduled jobs continue to work for legacy worker SDKs.
+   */
+  privilegedNoInvocationPolicy?: PrivilegedNoInvocationPolicy;
 }
+
+export type PrivilegedNoInvocationPolicy = "compat" | "deny_mixed_all_company";
 
 // ---------------------------------------------------------------------------
 // Handler map type (compatible with WorkerToHostHandlers from worker manager)
@@ -514,6 +528,7 @@ export function createHostClientHandlers(
 ): HostClientHandlers {
   const { pluginId, services } = options;
   const capabilitySet = new Set<PluginCapability>(options.capabilities);
+  const privilegedNoInvocationPolicy = options.privilegedNoInvocationPolicy ?? "compat";
 
   type CompanyScopeRequest =
     | { kind: "none" }
@@ -585,6 +600,19 @@ export function createHostClientHandlers(
     // all-company ones.
     const inferredScopes = context?.inferredCompanyScopes;
     const hasInferredCompanyScopes = !!inferredScopes && inferredScopes.length > 0;
+
+    if (
+      privilegedNoInvocationPolicy === "deny_mixed_all_company" &&
+      hasInferredCompanyScopes &&
+      requested.kind === "all"
+    ) {
+      throw new InvocationScopeDeniedError(
+        pluginId,
+        method,
+        "missing invocation id is not allowed for all-company calls while company-scoped invocations are active",
+      );
+    }
+
     if (context?.inferredAllCompanyScope && !hasInferredCompanyScopes) return;
 
     // No precise invocation id was echoed by the worker. The host supplied the

@@ -124,6 +124,7 @@ export type {
   HostServices,
   HostClientFactoryOptions,
   HostClientHandlers,
+  PrivilegedNoInvocationPolicy,
 } from "./host-client-factory.js";
 
 // JSON-RPC protocol types

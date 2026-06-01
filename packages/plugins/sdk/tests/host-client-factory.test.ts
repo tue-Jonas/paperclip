@@ -327,6 +327,56 @@ describe("createHostClientHandlers invocation company scope", () => {
     expect(companiesList).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects mixed-mode companies.list without invocation id under deny_mixed_all_company policy", async () => {
+    const companiesList = vi.fn(async () => [
+      { id: "company-a", name: "Company A" },
+      { id: "company-b", name: "Company B" },
+    ]);
+    const services = {
+      companies: { list: companiesList },
+    } as unknown as HostServices;
+
+    const handlers = createHostClientHandlers({
+      pluginId: "paperclip.test",
+      capabilities: ["companies.read"],
+      services,
+      privilegedNoInvocationPolicy: "deny_mixed_all_company",
+    });
+
+    await expect(
+      handlers["companies.list"](
+        {},
+        { inferredAllCompanyScope: true, inferredCompanyScopes: ["company-a"] },
+      ),
+    ).rejects.toBeInstanceOf(InvocationScopeDeniedError);
+    expect(companiesList).not.toHaveBeenCalled();
+  });
+
+  it("keeps pure system-mode companies.list working under deny_mixed_all_company policy", async () => {
+    const companiesList = vi.fn(async () => [
+      { id: "company-a", name: "Company A" },
+      { id: "company-b", name: "Company B" },
+    ]);
+    const services = {
+      companies: { list: companiesList },
+    } as unknown as HostServices;
+
+    const handlers = createHostClientHandlers({
+      pluginId: "paperclip.test",
+      capabilities: ["companies.read"],
+      services,
+      privilegedNoInvocationPolicy: "deny_mixed_all_company",
+    });
+
+    await expect(
+      handlers["companies.list"]({}, { inferredAllCompanyScope: true }),
+    ).resolves.toEqual([
+      { id: "company-a", name: "Company A" },
+      { id: "company-b", name: "Company B" },
+    ]);
+    expect(companiesList).toHaveBeenCalledTimes(1);
+  });
+
   it("still denies a non-companies.list all-company request under inferred scopes", async () => {
     const stateGet = vi.fn(async () => null);
     const services = {

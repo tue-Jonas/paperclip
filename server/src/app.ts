@@ -58,7 +58,10 @@ import { setPluginEventBus } from "./services/activity-log.js";
 import { createPluginDevWatcher } from "./services/plugin-dev-watcher.js";
 import { createPluginHostServiceCleanup } from "./services/plugin-host-service-cleanup.js";
 import { pluginRegistryService } from "./services/plugin-registry.js";
-import { createHostClientHandlers } from "@paperclipai/plugin-sdk";
+import {
+  createHostClientHandlers,
+  type PrivilegedNoInvocationPolicy,
+} from "@paperclipai/plugin-sdk";
 import type { BetterAuthSessionResult } from "./auth/better-auth.js";
 import { createCachedViteHtmlRenderer } from "./vite-html-renderer.js";
 import { DEFAULT_JSON_BODY_LIMIT, PORTABLE_JSON_BODY_LIMIT } from "./http/body-limits.js";
@@ -84,6 +87,10 @@ const VITE_DEV_STATIC_PATHS = new Set([
   "/site.webmanifest",
   "/sw.js",
 ]);
+const PRIVILEGED_NO_INVOCATION_POLICIES: readonly PrivilegedNoInvocationPolicy[] = [
+  "compat",
+  "deny_mixed_all_company",
+];
 
 export function isDatabaseConnectionUnavailableError(err: unknown): boolean {
   const error = err as { code?: unknown; message?: unknown; cause?: unknown };
@@ -119,6 +126,25 @@ export function shouldEnablePrivateHostnameGuard(opts: {
     opts.deploymentExposure === "private" &&
     (opts.deploymentMode === "local_trusted" || opts.deploymentMode === "authenticated")
   );
+}
+
+function resolvePrivilegedNoInvocationPolicy(): PrivilegedNoInvocationPolicy {
+  const raw = process.env.PAPERCLIP_PLUGIN_PRIVILEGED_NO_INVOCATION_POLICY?.trim();
+  if (!raw) return "compat";
+  if (
+    (PRIVILEGED_NO_INVOCATION_POLICIES as readonly string[]).includes(raw)
+  ) {
+    return raw as PrivilegedNoInvocationPolicy;
+  }
+  logger.warn(
+    {
+      value: raw,
+      envVar: "PAPERCLIP_PLUGIN_PRIVILEGED_NO_INVOCATION_POLICY",
+      allowedValues: PRIVILEGED_NO_INVOCATION_POLICIES,
+    },
+    "unknown plugin privileged no-invocation policy; falling back to compat",
+  );
+  return "compat";
 }
 
 export async function createApp(
@@ -194,6 +220,7 @@ export async function createApp(
 
   const hostServicesDisposers = new Map<string, () => void>();
   const workerManager = opts.pluginWorkerManager ?? createPluginWorkerManager();
+  const privilegedNoInvocationPolicy = resolvePrivilegedNoInvocationPolicy();
 
   // Mount API routes
   const api = Router();
@@ -291,6 +318,7 @@ export async function createApp(
           pluginId,
           capabilities: manifest.capabilities,
           services,
+          privilegedNoInvocationPolicy,
         });
       },
     },
