@@ -578,6 +578,11 @@ export function createHostClientHandlers(
     const inferredScopes = context?.inferredCompanyScopes;
     if (inferredScopes && inferredScopes.length > 0) {
       if (requested.kind === "all") {
+        // `companies.list` is a discovery call: allow it and let the handler
+        // filter the result down to the active inferred scopes (mirrors the
+        // echoed-scope path below). Other all-company requests (e.g. an
+        // unscoped company-store access) cannot be safely served and are denied.
+        if (method === "companies.list") return;
         throw new InvocationScopeDeniedError(
           pluginId,
           method,
@@ -751,10 +756,22 @@ export function createHostClientHandlers(
     "companies.list": gated("companies.list", async (params, context) => {
       const rows = await services.companies.list(params);
       const allowedCompanyId = readNonEmptyString(context?.invocationScope?.companyId);
-      if (!allowedCompanyId) return rows;
-      return rows.filter((company) =>
-        isRecord(company) && company.id === allowedCompanyId,
-      ) as WorkerToHostMethods["companies.list"][1];
+      if (allowedCompanyId) {
+        return rows.filter((company) =>
+          isRecord(company) && company.id === allowedCompanyId,
+        ) as WorkerToHostMethods["companies.list"][1];
+      }
+      // No precise invocation id echoed: restrict the discovery result to the
+      // active inferred company scopes so the worker never sees companies
+      // outside the invocations currently in flight (cross-company isolation).
+      const inferredScopes = context?.inferredCompanyScopes;
+      if (inferredScopes && inferredScopes.length > 0) {
+        const allow = new Set(inferredScopes);
+        return rows.filter((company) =>
+          isRecord(company) && typeof company.id === "string" && allow.has(company.id),
+        ) as WorkerToHostMethods["companies.list"][1];
+      }
+      return rows;
     }),
     "companies.get": gated("companies.get", async (params) => {
       return services.companies.get(params);

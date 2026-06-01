@@ -193,8 +193,11 @@ describe("createHostClientHandlers invocation company scope", () => {
     expect(issuesGet).not.toHaveBeenCalled();
   });
 
-  it("denies an all-company (companies.list) call while a specific scope is active", async () => {
-    const companiesList = vi.fn(async () => [{ id: "company-a" }]);
+  it("filters companies.list to the active inferred scopes (no invocation id)", async () => {
+    const companiesList = vi.fn(async () => [
+      { id: "company-a", name: "Company A" },
+      { id: "company-b", name: "Company B" },
+    ]);
     const services = {
       companies: { list: companiesList },
     } as unknown as HostServices;
@@ -205,10 +208,36 @@ describe("createHostClientHandlers invocation company scope", () => {
       services,
     });
 
+    // companies.list is a discovery call: with only inferred scopes it is
+    // allowed but filtered to those scopes (mirrors the echoed-scope path),
+    // so the check-watches job can enumerate its in-flight company.
     await expect(
       handlers["companies.list"]({}, { inferredCompanyScopes: ["company-a"] }),
+    ).resolves.toEqual([{ id: "company-a", name: "Company A" }]);
+    expect(companiesList).toHaveBeenCalledTimes(1);
+  });
+
+  it("still denies a non-companies.list all-company request under inferred scopes", async () => {
+    const stateGet = vi.fn(async () => null);
+    const services = {
+      state: { get: stateGet },
+    } as unknown as HostServices;
+
+    const handlers = createHostClientHandlers({
+      pluginId: "paperclip.test",
+      capabilities: ["plugin.state.read"],
+      services,
+    });
+
+    // scopeKind=company with no scopeId resolves to an all-company request; it
+    // cannot be safely served from inferred scopes, so it is denied.
+    await expect(
+      handlers["state.get"](
+        { scopeKind: "company", stateKey: "settings" },
+        { inferredCompanyScopes: ["company-a"] },
+      ),
     ).rejects.toBeInstanceOf(InvocationScopeDeniedError);
-    expect(companiesList).not.toHaveBeenCalled();
+    expect(stateGet).not.toHaveBeenCalled();
   });
 
   it("allows an all-company (companies.list) call when no scope is active", async () => {
