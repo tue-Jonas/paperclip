@@ -83,6 +83,17 @@ describe("evaluateInviteSignUpGate", () => {
     ).toEqual({ allowed: false, reason: "invalid_invite" });
   });
 
+  it("rejects an already-accepted invite", () => {
+    expect(
+      evaluateInviteSignUpGate({
+        inviteOnly: true,
+        token: "pcp_invite_abcd1234",
+        invite: makeInvite({ acceptedAt: new Date(NOW - 1000) }),
+        now: NOW,
+      }),
+    ).toEqual({ allowed: false, reason: "invalid_invite" });
+  });
+
   it("rejects an expired invite", () => {
     expect(
       evaluateInviteSignUpGate({

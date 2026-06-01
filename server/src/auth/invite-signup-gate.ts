@@ -68,6 +68,7 @@ export function evaluateInviteSignUpGate(input: {
   if (
     !invite ||
     invite.revokedAt ||
+    invite.acceptedAt ||
     invite.expiresAt.getTime() <= now ||
     !inviteAllowsHumanJoin(invite)
   ) {
