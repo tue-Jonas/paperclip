@@ -264,7 +264,11 @@ export type PluginRpcErrorCode =
  * Absence of this metadata means the invocation is instance/global scoped.
  */
 export interface PluginInvocationScope {
-  companyId: string;
+  /**
+   * `string` => company-scoped invocation.
+   * `null` => explicit all-company/system invocation.
+   */
+  companyId: string | null;
 }
 
 /**
@@ -294,6 +298,11 @@ export interface WorkerHostCallContext {
    * company is itself an active invocation scope.
    */
   inferredCompanyScopes?: readonly string[];
+  /**
+   * True when at least one active invocation is explicit all-company/system
+   * scope. Used for older worker lineages that omit invocation ids.
+   */
+  inferredAllCompanyScope?: boolean;
 }
 
 // ---------------------------------------------------------------------------

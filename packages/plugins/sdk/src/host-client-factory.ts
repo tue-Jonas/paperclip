@@ -569,13 +569,31 @@ export function createHostClientHandlers(
       );
     }
 
-    // No precise invocation id was echoed by the worker. The host supplied the
-    // set of currently-active company scopes instead. Allow a single-company
-    // request only when that company is itself an active scope; deny
-    // cross-company requests and all-company (`companies.list`) requests that
-    // cannot be satisfied by a specific active scope. This preserves
-    // cross-company isolation while letting same-company nested calls through.
+    // A system/all-company invocation is currently active. Grant the blanket
+    // all-company privilege ONLY in "pure" system mode — i.e. no company-scoped
+    // invocation is also in flight. This is the periodic-job case (for example
+    // `check-watches`) that must enumerate companies while older worker lineages
+    // still omit invocation ids.
+    //
+    // In "mixed" mode (a system invocation overlapping one or more
+    // company-scoped invocations) a worker call that omits
+    // `paperclipInvocationId` cannot be bound to the system lineage.
+    // Blanket-allowing here would let a concurrent company-scoped call inherit
+    // all-company privileges and reach across companies, violating
+    // cross-company isolation. So we fall through to the company-restricted path
+    // below, which allows only same-company requests and denies cross-company /
+    // all-company ones.
     const inferredScopes = context?.inferredCompanyScopes;
+    const hasInferredCompanyScopes = !!inferredScopes && inferredScopes.length > 0;
+    if (context?.inferredAllCompanyScope && !hasInferredCompanyScopes) return;
+
+    // No precise invocation id was echoed by the worker. The host supplied the
+    // set of currently-active company scopes instead (which in mixed mode also
+    // covers the overlapping system invocation). Allow a single-company request
+    // only when that company is itself an active scope; deny cross-company
+    // requests and all-company (`companies.list`) requests that cannot be
+    // satisfied by a specific active scope. This preserves cross-company
+    // isolation while letting same-company nested calls through.
     if (inferredScopes && inferredScopes.length > 0) {
       if (requested.kind === "all") {
         // `companies.list` is a discovery call: allow it and let the handler
@@ -600,8 +618,10 @@ export function createHostClientHandlers(
       }
       return;
     }
-
-    const allowedCompanyId = readNonEmptyString(context?.invocationScope?.companyId);
+    const invocationScope = context?.invocationScope;
+    if (!invocationScope) return;
+    if (invocationScope.companyId === null) return;
+    const allowedCompanyId = readNonEmptyString(invocationScope.companyId);
     if (!allowedCompanyId) return;
 
     if (requested.kind === "all") {
@@ -755,6 +775,15 @@ export function createHostClientHandlers(
     // Companies
     "companies.list": gated("companies.list", async (params, context) => {
       const rows = await services.companies.list(params);
+      const inferredScopes = context?.inferredCompanyScopes;
+      const hasInferredCompanyScopes = !!inferredScopes && inferredScopes.length > 0;
+      // Pure system/all-company invocation (no company-scoped invocation also in
+      // flight): return the full discovery result. In "mixed" mode we fall
+      // through and filter to the inferred company set so a concurrent
+      // company-scoped call cannot enumerate companies outside its scope.
+      if (context?.inferredAllCompanyScope && !hasInferredCompanyScopes) return rows;
+      if (context?.invocationScope?.companyId === null) return rows;
+
       const allowedCompanyId = readNonEmptyString(context?.invocationScope?.companyId);
       if (allowedCompanyId) {
         return rows.filter((company) =>
@@ -764,7 +793,6 @@ export function createHostClientHandlers(
       // No precise invocation id echoed: restrict the discovery result to the
       // active inferred company scopes so the worker never sees companies
       // outside the invocations currently in flight (cross-company isolation).
-      const inferredScopes = context?.inferredCompanyScopes;
       if (inferredScopes && inferredScopes.length > 0) {
         const allow = new Set(inferredScopes);
         return rows.filter((company) =>

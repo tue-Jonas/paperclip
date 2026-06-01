@@ -224,6 +224,18 @@ interface ActiveInvocation {
   timer?: ReturnType<typeof setTimeout>;
 }
 
+export interface WorkerCallOptions {
+  timeoutMs?: number;
+  /**
+   * Optional explicit invocation scope override.
+   * - `undefined`: derive scope from the method params (default behavior).
+   * - `{ companyId: string }`: force company scope.
+   * - `{ companyId: null }`: force explicit all-company/system scope.
+   * - `null`: do not attach invocation scope metadata.
+   */
+  invocationScope?: PluginInvocationScope | null;
+}
+
 // ---------------------------------------------------------------------------
 // PluginWorkerHandle — manages a single worker process
 // ---------------------------------------------------------------------------
@@ -263,7 +275,7 @@ export interface PluginWorkerHandle {
    *
    * @param method - The RPC method name
    * @param params - Method parameters
-   * @param timeoutMs - Optional per-call timeout override
+   * @param timeoutMsOrOptions - Optional timeout override or explicit invocation scope override
    * @returns The method result
    * @throws {JsonRpcCallError} if the worker returns an error response
    * @throws {Error} if the worker is not running or the call times out
@@ -271,7 +283,7 @@ export interface PluginWorkerHandle {
   call<M extends HostToWorkerMethodName>(
     method: M,
     params: HostToWorkerMethods[M][0],
-    timeoutMs?: number,
+    timeoutMsOrOptions?: number | WorkerCallOptions,
   ): Promise<HostToWorkerMethods[M][1]>;
 
   /**
@@ -366,7 +378,7 @@ export interface PluginWorkerManager {
     pluginId: string,
     method: M,
     params: HostToWorkerMethods[M][0],
-    timeoutMs?: number,
+    timeoutMsOrOptions?: number | WorkerCallOptions,
   ): Promise<HostToWorkerMethods[M][1]>;
 }
 
@@ -565,13 +577,24 @@ export function createPluginWorkerHandle(
     activeInvocations.delete(invocation.id);
   }
 
-  function activeCompanyScopeIds(): string[] {
+  function activeInvocationScopeSummary(): {
+    companyIds: string[];
+    hasAllCompanyScope: boolean;
+  } {
     const ids = new Set<string>();
+    let hasAllCompanyScope = false;
     for (const entry of activeInvocations.values()) {
       const id = readNonEmptyString(entry.scope.companyId);
-      if (id) ids.add(id);
+      if (id) {
+        ids.add(id);
+      } else {
+        hasAllCompanyScope = true;
+      }
     }
-    return Array.from(ids);
+    return {
+      companyIds: Array.from(ids),
+      hasAllCompanyScope,
+    };
   }
 
   function contextForWorkerMessage(message: JsonRpcRequest | JsonRpcNotification): WorkerHostCallContext {
@@ -587,9 +610,15 @@ export function createPluginWorkerHandle(
       // let the capability layer allow same-company calls and deny
       // cross-company / all-company mismatches. When nothing is active the call
       // is treated as instance/global scoped and allowed.
-      const inferred = activeCompanyScopeIds();
-      if (inferred.length === 0) return {};
-      return { inferredCompanyScopes: inferred };
+      const { companyIds, hasAllCompanyScope } = activeInvocationScopeSummary();
+      if (hasAllCompanyScope) {
+        return {
+          inferredAllCompanyScope: true,
+          ...(companyIds.length > 0 ? { inferredCompanyScopes: companyIds } : {}),
+        };
+      }
+      if (companyIds.length === 0) return {};
+      return { inferredCompanyScopes: companyIds };
     }
     const entry = activeInvocations.get(invocationId);
     if (!entry) return { invalidInvocationScope: true };
@@ -703,9 +732,14 @@ export function createPluginWorkerHandle(
         return;
       }
       const inferredScopes = context.inferredCompanyScopes;
-      if (inferredScopes && inferredScopes.length > 0) {
-        // No invocation id echoed: only forward when the stream's company is
-        // itself an active invocation scope (cross-company isolation).
+      const hasInferredCompanyScopes = !!inferredScopes && inferredScopes.length > 0;
+      if (context.inferredAllCompanyScope && !hasInferredCompanyScopes) {
+        // Pure all-company/system invocation is active: forward.
+      } else if (inferredScopes && inferredScopes.length > 0) {
+        // No invocation id echoed (and possibly mixed with an overlapping
+        // system invocation): only forward when the stream's company is itself
+        // an active invocation scope. This preserves cross-company isolation and
+        // prevents all-company privilege bleed in mixed mode.
         if (!companyId || !inferredScopes.includes(companyId)) {
           log.warn(
             { method: notification.method, companyId, inferredScopes },
@@ -1157,10 +1191,19 @@ export function createPluginWorkerHandle(
   // RPC call implementation
   // -----------------------------------------------------------------------
 
+  function normalizeCallOptions(
+    timeoutMsOrOptions?: number | WorkerCallOptions,
+  ): WorkerCallOptions {
+    if (typeof timeoutMsOrOptions === "number") {
+      return { timeoutMs: timeoutMsOrOptions };
+    }
+    return timeoutMsOrOptions ?? {};
+  }
+
   function callInternal<M extends HostToWorkerMethodName>(
     method: M,
     params: HostToWorkerMethods[M][0],
-    timeoutMs?: number,
+    timeoutMsOrOptions?: number | WorkerCallOptions,
   ): Promise<HostToWorkerMethods[M][1]> {
     const rpcPromise = new Promise<HostToWorkerMethods[M][1]>((resolve, reject) => {
       if (!childProcess?.stdin?.writable) {
@@ -1173,8 +1216,12 @@ export function createPluginWorkerHandle(
       }
 
       const id = nextRequestId++;
-      const timeout = Math.min(timeoutMs ?? rpcTimeoutMs, MAX_RPC_TIMEOUT_MS);
-      const invocationScope = deriveInvocationScope(method, params);
+      const callOptions = normalizeCallOptions(timeoutMsOrOptions);
+      const timeout = Math.min(callOptions.timeoutMs ?? rpcTimeoutMs, MAX_RPC_TIMEOUT_MS);
+      const invocationScope =
+        callOptions.invocationScope === undefined
+          ? deriveInvocationScope(method, params)
+          : callOptions.invocationScope;
       const invocation = invocationScope ? registerInvocation(invocationScope) : null;
 
       // Guard against double-settlement. When a process exits all pending
@@ -1283,7 +1330,7 @@ export function createPluginWorkerHandle(
     call<M extends HostToWorkerMethodName>(
       method: M,
       params: HostToWorkerMethods[M][0],
-      timeoutMs?: number,
+      timeoutMsOrOptions?: number | WorkerCallOptions,
     ): Promise<HostToWorkerMethods[M][1]> {
       if (status !== "running" && status !== "starting") {
         return Promise.reject(
@@ -1292,7 +1339,7 @@ export function createPluginWorkerHandle(
           ),
         );
       }
-      return callInternal(method, params, timeoutMs);
+      return callInternal(method, params, timeoutMsOrOptions);
     },
 
     notify(method: string, params: unknown) {
@@ -1507,7 +1554,7 @@ export function createPluginWorkerManager(
       pluginId: string,
       method: M,
       params: HostToWorkerMethods[M][0],
-      timeoutMs?: number,
+      timeoutMsOrOptions?: number | WorkerCallOptions,
     ): Promise<HostToWorkerMethods[M][1]> {
       const handle = workers.get(pluginId);
       if (!handle) {
@@ -1515,7 +1562,7 @@ export function createPluginWorkerManager(
           new Error(`No worker registered for plugin "${pluginId}"`),
         );
       }
-      return handle.call(method, params, timeoutMs);
+      return handle.call(method, params, timeoutMsOrOptions);
     },
   };
 }

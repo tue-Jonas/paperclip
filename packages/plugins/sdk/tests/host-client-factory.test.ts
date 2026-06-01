@@ -217,6 +217,116 @@ describe("createHostClientHandlers invocation company scope", () => {
     expect(companiesList).toHaveBeenCalledTimes(1);
   });
 
+  it("allows all-company host calls in PURE system mode (no company scope in flight)", async () => {
+    const issuesGet = vi.fn(async () => ({ id: "issue-1" }));
+    const services = {
+      issues: { get: issuesGet },
+    } as unknown as HostServices;
+
+    const handlers = createHostClientHandlers({
+      pluginId: "paperclip.test",
+      capabilities: ["issues.read"],
+      services,
+    });
+
+    // Pure system/all-company invocation: no company-scoped invocation is also
+    // active, so the blanket all-company privilege is granted (e.g. the
+    // periodic check-watches job). A cross-company nested call is allowed.
+    await expect(
+      handlers["issues.get"](
+        { companyId: "company-b", issueId: "issue-1" },
+        { inferredAllCompanyScope: true },
+      ),
+    ).resolves.toEqual({ id: "issue-1" });
+    expect(issuesGet).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT bleed all-company privilege in MIXED mode (system + company scope)", async () => {
+    // TWX-88 regression: when a system/all-company invocation overlaps a
+    // company-scoped invocation, a no-invocation-id worker call must NOT inherit
+    // all-company privileges. It is restricted to the inferred company set.
+    const issuesGet = vi.fn(async (params: { companyId: string }) => ({
+      id: params.companyId,
+    }));
+    const services = {
+      issues: { get: issuesGet },
+    } as unknown as HostServices;
+
+    const handlers = createHostClientHandlers({
+      pluginId: "paperclip.test",
+      capabilities: ["issues.read"],
+      services,
+    });
+
+    // Same-company (company-a) request is allowed.
+    await expect(
+      handlers["issues.get"](
+        { companyId: "company-a", issueId: "issue-1" },
+        { inferredAllCompanyScope: true, inferredCompanyScopes: ["company-a"] },
+      ),
+    ).resolves.toEqual({ id: "company-a" });
+
+    // Cross-company (company-b) request is denied despite the active all-company
+    // scope — no privilege bleed.
+    await expect(
+      handlers["issues.get"](
+        { companyId: "company-b", issueId: "issue-1" },
+        { inferredAllCompanyScope: true, inferredCompanyScopes: ["company-a"] },
+      ),
+    ).rejects.toBeInstanceOf(InvocationScopeDeniedError);
+    expect(issuesGet).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not filter companies.list in PURE system mode", async () => {
+    const companiesList = vi.fn(async () => [
+      { id: "company-a", name: "Company A" },
+      { id: "company-b", name: "Company B" },
+    ]);
+    const services = {
+      companies: { list: companiesList },
+    } as unknown as HostServices;
+
+    const handlers = createHostClientHandlers({
+      pluginId: "paperclip.test",
+      capabilities: ["companies.read"],
+      services,
+    });
+
+    await expect(
+      handlers["companies.list"]({}, { inferredAllCompanyScope: true }),
+    ).resolves.toEqual([
+      { id: "company-a", name: "Company A" },
+      { id: "company-b", name: "Company B" },
+    ]);
+    expect(companiesList).toHaveBeenCalledTimes(1);
+  });
+
+  it("filters companies.list to the inferred set in MIXED mode (no privilege bleed)", async () => {
+    // TWX-88 regression: a system invocation overlapping a company-scoped one
+    // must not let companies.list enumerate companies outside the inferred set.
+    const companiesList = vi.fn(async () => [
+      { id: "company-a", name: "Company A" },
+      { id: "company-b", name: "Company B" },
+    ]);
+    const services = {
+      companies: { list: companiesList },
+    } as unknown as HostServices;
+
+    const handlers = createHostClientHandlers({
+      pluginId: "paperclip.test",
+      capabilities: ["companies.read"],
+      services,
+    });
+
+    await expect(
+      handlers["companies.list"](
+        {},
+        { inferredAllCompanyScope: true, inferredCompanyScopes: ["company-a"] },
+      ),
+    ).resolves.toEqual([{ id: "company-a", name: "Company A" }]);
+    expect(companiesList).toHaveBeenCalledTimes(1);
+  });
+
   it("still denies a non-companies.list all-company request under inferred scopes", async () => {
     const stateGet = vi.fn(async () => null);
     const services = {

@@ -385,6 +385,161 @@ describe("plugin-worker-manager stderr failure context", () => {
     }
   });
 
+  it("allows no-invocation-id nested calls across companies when an explicit all-company scope is active", async () => {
+    const handlers = createHostClientHandlers({
+      pluginId: "test.plugin",
+      capabilities: ["companies.read"],
+      services: {
+        companies: {
+          list: vi.fn(async () => []),
+          get: vi.fn(async (params: { companyId: string }) => ({ id: params.companyId })),
+        },
+      } as unknown as HostServices,
+    });
+    const handle = createPluginWorkerHandle("test.plugin", {
+      entrypointPath: INVOCATION_SCOPE_WORKER_ENTRYPOINT,
+      manifest: TEST_MANIFEST,
+      config: {},
+      instanceInfo: {
+        instanceId: "instance-1",
+        hostVersion: "1.0.0",
+      },
+      apiVersion: 1,
+      hostHandlers: handlers,
+    });
+
+    try {
+      await handle.start();
+
+      // The worker omits paperclipInvocationId (mode omitted), but the host
+      // call is explicitly tagged as all-company/system scope, so cross-company
+      // nested calls are allowed.
+      await expect(handle.call("performAction", {
+        key: "probe",
+        params: {
+          requestedCompanyId: "company-b",
+        },
+        actorContext: {
+          type: "agent",
+          userId: null,
+          agentId: "agent-1",
+          runId: "run-1",
+          companyId: "company-a",
+        },
+        renderEnvironment: null,
+      }, {
+        invocationScope: { companyId: null },
+      })).resolves.toEqual({
+        id: "company-b",
+      });
+    } finally {
+      await handle.stop().catch(() => undefined);
+    }
+  });
+
+  it("does not bleed all-company privilege when a system invocation overlaps a company-scoped call", async () => {
+    // TWX-88 regression: a system/all-company invocation (e.g. a fire-and-forget
+    // notify dispatch or a runJob) overlapping a company-scoped invocation from
+    // the SAME worker must not let a no-invocation-id nested call inherit
+    // all-company privileges. We keep the system invocation active by hanging its
+    // nested companies.get, then fire a company-a-scoped call whose nested no-id
+    // companies.get targets company-b — it must be denied.
+    let markSystemNestedInFlight: () => void = () => {};
+    const systemNestedInFlight = new Promise<void>((resolve) => {
+      markSystemNestedInFlight = resolve;
+    });
+    const companiesGet = vi.fn((params: { companyId: string }) => {
+      if (params.companyId === "company-system") {
+        // Signal that the system invocation's nested call is now in-flight, then
+        // never resolve — this keeps the system invocation registered so it
+        // overlaps the company-scoped call fired below.
+        markSystemNestedInFlight();
+        return new Promise(() => {});
+      }
+      return Promise.resolve({ id: params.companyId });
+    });
+    const handlers = createHostClientHandlers({
+      pluginId: "test.plugin",
+      capabilities: ["companies.read"],
+      services: {
+        companies: {
+          get: companiesGet,
+        },
+      } as unknown as HostServices,
+    });
+    const handle = createPluginWorkerHandle("test.plugin", {
+      entrypointPath: INVOCATION_SCOPE_WORKER_ENTRYPOINT,
+      manifest: TEST_MANIFEST,
+      config: {},
+      instanceInfo: {
+        instanceId: "instance-1",
+        hostVersion: "1.0.0",
+      },
+      apiVersion: 1,
+      hostHandlers: handlers,
+    });
+
+    try {
+      await handle.start();
+
+      // System/all-company invocation goes in flight and stays active because
+      // its nested companies.get(company-system) never resolves.
+      const systemCall = handle.call(
+        "performAction",
+        {
+          key: "probe",
+          params: { requestedCompanyId: "company-system" },
+          actorContext: {
+            type: "agent",
+            userId: null,
+            agentId: "agent-1",
+            runId: "run-1",
+            companyId: "company-a",
+          },
+          renderEnvironment: null,
+        },
+        { invocationScope: { companyId: null } },
+      );
+      // Avoid an unhandled rejection when the worker is stopped in `finally`.
+      systemCall.catch(() => undefined);
+
+      // Wait until the system invocation's nested call is actually in-flight
+      // (its handler hangs), so the system invocation is held registered. This
+      // makes the overlap deterministic: at this point only the system scope is
+      // active, so its own nested company-system call was admitted in pure mode.
+      await systemNestedInFlight;
+
+      // Concurrent company-a-scoped call: its nested no-id companies.get targets
+      // company-b. With both a system and a company-a invocation active (mixed
+      // mode), the cross-company request must be denied — no privilege bleed.
+      await expect(
+        handle.call("performAction", {
+          key: "probe",
+          params: { requestedCompanyId: "company-b" },
+          actorContext: {
+            type: "agent",
+            userId: null,
+            agentId: "agent-1",
+            runId: "run-2",
+            companyId: "company-a",
+          },
+          renderEnvironment: null,
+        }),
+      ).rejects.toMatchObject({
+        code: PLUGIN_RPC_ERROR_CODES.INVOCATION_SCOPE_DENIED,
+        message: expect.stringContaining("outside the active invocation scopes"),
+      });
+
+      // The denied cross-company request never reached the service handler.
+      expect(companiesGet).not.toHaveBeenCalledWith(
+        { companyId: "company-b" },
+        expect.anything(),
+      );
+    } finally {
+      await handle.stop().catch(() => undefined);
+    }
+  });
+
   it("rejects nested worker host calls that forge an unknown invocation id", async () => {
     const companiesGet = vi.fn(async (params: { companyId: string }) => ({ id: params.companyId }));
     const handlers = createHostClientHandlers({

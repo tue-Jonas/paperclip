@@ -378,7 +378,10 @@ export function createPluginJobScheduler(
             scheduledAt: (job.nextRunAt ?? new Date()).toISOString(),
           },
         },
-        jobTimeoutMs,
+        {
+          timeoutMs: jobTimeoutMs,
+          invocationScope: { companyId: null },
+        },
       );
 
       // 4. Mark run as succeeded
@@ -523,7 +526,10 @@ export function createPluginJobScheduler(
             scheduledAt: new Date().toISOString(),
           },
         },
-        jobTimeoutMs,
+        {
+          timeoutMs: jobTimeoutMs,
+          invocationScope: { companyId: null },
+        },
       );
 
       const durationMs = Date.now() - startedAt;
