@@ -233,6 +233,26 @@ describe("server adapter registry", () => {
     await expect(listAdapterModelProfiles("pi_local")).resolves.toEqual([]);
   });
 
+  it("registers free-mesh as a low-stakes OpenAI-compatible built-in adapter", async () => {
+    const adapter = findActiveServerAdapter("free-mesh");
+
+    expect(adapter).not.toBeNull();
+    expect(adapter!.supportsLocalAgentJwt).toBe(false);
+    await expect(listAdapterModels("free-mesh")).resolves.toEqual([
+      { id: "swarm-public", label: "swarm-public (low-stakes/public only)" },
+    ]);
+    await expect(listAdapterModelProfiles("free-mesh")).resolves.toEqual([
+      expect.objectContaining({
+        key: "cheap",
+        adapterConfig: expect.objectContaining({
+          model: "swarm-public",
+          dataPolicy: "low_stakes_public_only",
+        }),
+        source: "adapter_default",
+      }),
+    ]);
+  });
+
   it("wraps built-in npm runtime installs with the sandbox-aware install helper", () => {
     const expectedClaudeInstall = `if ! command -v 'claude' >/dev/null 2>&1; then ${buildSandboxNpmInstallCommand("@anthropic-ai/claude-code")}; fi`;
     const expectedCodexInstall = `if ! command -v 'codex' >/dev/null 2>&1; then ${buildSandboxNpmInstallCommand("@openai/codex")}; fi`;
