@@ -789,6 +789,59 @@ describe("NewIssueDialog", () => {
     act(() => root.unmount());
   });
 
+  it("stages media selected from the create-issue media picker and uploads it after creation", async () => {
+    const { root } = renderDialog(container);
+    await flush();
+
+    const titleInput = container.querySelector('textarea[placeholder="Issue title"]') as HTMLTextAreaElement | null;
+    expect(titleInput).not.toBeNull();
+    await typeTextareaValue(titleInput!, "Issue with media");
+
+    const mediaButton = container.querySelector('[data-testid="new-issue-media-button"]') as HTMLButtonElement | null;
+    const mediaInput = container.querySelector('[data-testid="new-issue-media-input"]') as HTMLInputElement | null;
+    expect(mediaButton).not.toBeNull();
+    expect(mediaInput).not.toBeNull();
+    expect(mediaButton?.className).not.toContain("hidden");
+    expect(mediaInput?.accept).toBe("image/*,video/*");
+    expect(mediaInput?.multiple).toBe(true);
+
+    const videoFile = new File(["video-bytes"], "clip.mp4", {
+      type: "video/mp4",
+      lastModified: 1,
+    });
+
+    await act(async () => {
+      Object.defineProperty(mediaInput!, "files", {
+        configurable: true,
+        value: [videoFile],
+      });
+      mediaInput!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await flush();
+
+    expect(container.textContent).toContain("clip.mp4");
+    expect(container.textContent).toContain("video/mp4");
+
+    const submitButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("Create Issue"));
+    expect(submitButton).not.toBeUndefined();
+
+    await act(async () => {
+      submitButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flush();
+
+    expect(mockIssuesApi.create).toHaveBeenCalledWith(
+      "company-1",
+      expect.objectContaining({
+        title: "Issue with media",
+      }),
+    );
+    expect(mockIssuesApi.uploadAttachment).toHaveBeenCalledWith("company-1", "issue-2", videoFile);
+
+    act(() => root.unmount());
+  });
+
   it("allows editor autocomplete portal pointer events inside the modal", async () => {
     const { root } = renderDialog(container);
     await flush();
