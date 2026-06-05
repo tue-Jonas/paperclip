@@ -52,6 +52,7 @@ import {
   AlertTriangle,
   Tag,
   Calendar,
+  ImagePlus,
   Paperclip,
   FileText,
   Flag,
@@ -108,7 +109,8 @@ import {
   type IssueModelLane,
 } from "../lib/issue-assignee-overrides";
 
-const STAGED_FILE_ACCEPT = "image/*,application/pdf,text/plain,text/markdown,application/json,text/csv,text/html,.md,.markdown";
+const STAGED_MEDIA_ACCEPT = "image/*,video/*";
+const STAGED_FILE_ACCEPT = `${STAGED_MEDIA_ACCEPT},application/pdf,text/plain,text/markdown,application/json,text/csv,text/html,.md,.markdown`;
 
 const ISSUE_THINKING_EFFORT_OPTIONS = {
   claude_local: [
@@ -453,6 +455,7 @@ export function NewIssueDialog() {
   const [moreOpen, setMoreOpen] = useState(false);
   const [companyOpen, setCompanyOpen] = useState(false);
   const descriptionEditorRef = useRef<MarkdownEditorRef>(null);
+  const stageMediaInputRef = useRef<HTMLInputElement | null>(null);
   const stageFileInputRef = useRef<HTMLInputElement | null>(null);
   const assigneeSelectorRef = useRef<HTMLButtonElement | null>(null);
   const projectSelectorRef = useRef<HTMLButtonElement | null>(null);
@@ -1037,6 +1040,13 @@ export function NewIssueDialog() {
     stageFiles(Array.from(evt.target.files ?? []));
     if (stageFileInputRef.current) {
       stageFileInputRef.current.value = "";
+    }
+  }
+
+  function handleStageMediaPicked(evt: ChangeEvent<HTMLInputElement>) {
+    stageFiles(Array.from(evt.target.files ?? []));
+    if (stageMediaInputRef.current) {
+      stageMediaInputRef.current.value = "";
     }
   }
 
@@ -1912,17 +1922,42 @@ export function NewIssueDialog() {
           </button> */}
 
           <input
+            ref={stageMediaInputRef}
+            type="file"
+            accept={STAGED_MEDIA_ACCEPT}
+            className="hidden"
+            onChange={handleStageMediaPicked}
+            multiple
+            data-testid="new-issue-media-input"
+          />
+          <button
+            type="button"
+            data-testid="new-issue-media-button"
+            className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent/50"
+            onClick={() => stageMediaInputRef.current?.click()}
+            disabled={createIssue.isPending}
+            title="Attach media"
+            aria-label="Attach media"
+          >
+            <ImagePlus className="h-3 w-3" />
+            Media
+          </button>
+
+          <input
             ref={stageFileInputRef}
             type="file"
             accept={STAGED_FILE_ACCEPT}
             className="hidden"
             onChange={handleStageFilesPicked}
             multiple
+            data-testid="new-issue-file-input"
           />
           <button
+            type="button"
             className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs hover:bg-accent/50 transition-colors text-muted-foreground"
             onClick={() => stageFileInputRef.current?.click()}
             disabled={createIssue.isPending}
+            title="Upload file"
           >
             <Paperclip className="h-3 w-3" />
             Upload
