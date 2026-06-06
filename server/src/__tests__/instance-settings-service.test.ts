@@ -20,6 +20,16 @@ describe("instance settings service", () => {
       autoRestartDevServerWhenIdle: true,
       enableIssueGraphLivenessAutoRecovery: true,
       issueGraphLivenessAutoRecoveryLookbackHours: 48,
+      masterRuntimeFailover: {
+        mode: "auto",
+        claudeLimitedUntil: null,
+        codexLimitedUntil: null,
+        activeRuntime: null,
+        reason: null,
+        updatedAt: null,
+      },
+      enableTransientAgentErrorAutoClear: true,
+      transientAgentErrorAutoClearMaxAttempts: 4,
     });
   });
 });

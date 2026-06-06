@@ -761,6 +761,9 @@ export {
   type MasterRuntimeFailoverMode,
   type MasterRuntimeKey,
   type MasterRuntimeFailoverSettings,
+  DEFAULT_TRANSIENT_AGENT_ERROR_AUTO_CLEAR_MAX_ATTEMPTS,
+  MIN_TRANSIENT_AGENT_ERROR_AUTO_CLEAR_MAX_ATTEMPTS,
+  MAX_TRANSIENT_AGENT_ERROR_AUTO_CLEAR_MAX_ATTEMPTS,
 } from "./types/instance.js";
 
 export type {

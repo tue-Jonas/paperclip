@@ -5,6 +5,7 @@ import {
   DEFAULT_BACKUP_RETENTION,
   DEFAULT_ISSUE_GRAPH_LIVENESS_AUTO_RECOVERY_LOOKBACK_HOURS,
   DEFAULT_MASTER_RUNTIME_FAILOVER,
+  DEFAULT_TRANSIENT_AGENT_ERROR_AUTO_CLEAR_MAX_ATTEMPTS,
   instanceGeneralSettingsSchema,
   type InstanceGeneralSettings,
   instanceExperimentalSettingsSchema,
@@ -52,6 +53,11 @@ export function normalizeExperimentalSettings(raw: unknown): InstanceExperimenta
         parsed.data.issueGraphLivenessAutoRecoveryLookbackHours ??
         DEFAULT_ISSUE_GRAPH_LIVENESS_AUTO_RECOVERY_LOOKBACK_HOURS,
       masterRuntimeFailover: parsed.data.masterRuntimeFailover ?? DEFAULT_MASTER_RUNTIME_FAILOVER,
+      enableTransientAgentErrorAutoClear:
+        parsed.data.enableTransientAgentErrorAutoClear ?? true,
+      transientAgentErrorAutoClearMaxAttempts:
+        parsed.data.transientAgentErrorAutoClearMaxAttempts ??
+        DEFAULT_TRANSIENT_AGENT_ERROR_AUTO_CLEAR_MAX_ATTEMPTS,
     };
   }
   return {
@@ -64,6 +70,9 @@ export function normalizeExperimentalSettings(raw: unknown): InstanceExperimenta
     issueGraphLivenessAutoRecoveryLookbackHours:
       DEFAULT_ISSUE_GRAPH_LIVENESS_AUTO_RECOVERY_LOOKBACK_HOURS,
     masterRuntimeFailover: DEFAULT_MASTER_RUNTIME_FAILOVER,
+    enableTransientAgentErrorAutoClear: true,
+    transientAgentErrorAutoClearMaxAttempts:
+      DEFAULT_TRANSIENT_AGENT_ERROR_AUTO_CLEAR_MAX_ATTEMPTS,
   };
 }
 

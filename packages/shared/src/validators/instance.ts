@@ -10,6 +10,9 @@ import {
   MASTER_RUNTIME_FAILOVER_MODES,
   MAX_ISSUE_GRAPH_LIVENESS_AUTO_RECOVERY_LOOKBACK_HOURS,
   MIN_ISSUE_GRAPH_LIVENESS_AUTO_RECOVERY_LOOKBACK_HOURS,
+  DEFAULT_TRANSIENT_AGENT_ERROR_AUTO_CLEAR_MAX_ATTEMPTS,
+  MAX_TRANSIENT_AGENT_ERROR_AUTO_CLEAR_MAX_ATTEMPTS,
+  MIN_TRANSIENT_AGENT_ERROR_AUTO_CLEAR_MAX_ATTEMPTS,
 } from "../types/instance.js";
 import { feedbackDataSharingPreferenceSchema } from "./feedback.js";
 
@@ -60,6 +63,13 @@ export const instanceExperimentalSettingsSchema = z.object({
     .max(MAX_ISSUE_GRAPH_LIVENESS_AUTO_RECOVERY_LOOKBACK_HOURS)
     .default(DEFAULT_ISSUE_GRAPH_LIVENESS_AUTO_RECOVERY_LOOKBACK_HOURS),
   masterRuntimeFailover: masterRuntimeFailoverSettingsSchema.default(DEFAULT_MASTER_RUNTIME_FAILOVER),
+  enableTransientAgentErrorAutoClear: z.boolean().default(true),
+  transientAgentErrorAutoClearMaxAttempts: z
+    .number()
+    .int()
+    .min(MIN_TRANSIENT_AGENT_ERROR_AUTO_CLEAR_MAX_ATTEMPTS)
+    .max(MAX_TRANSIENT_AGENT_ERROR_AUTO_CLEAR_MAX_ATTEMPTS)
+    .default(DEFAULT_TRANSIENT_AGENT_ERROR_AUTO_CLEAR_MAX_ATTEMPTS),
 }).strict();
 
 export const patchInstanceExperimentalSettingsSchema = instanceExperimentalSettingsSchema.partial();

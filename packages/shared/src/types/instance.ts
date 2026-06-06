@@ -29,6 +29,12 @@ export const DEFAULT_MASTER_RUNTIME_FAILOVER: MasterRuntimeFailoverSettings = {
   updatedAt: null,
 };
 
+// TWB-305: bounded auto-clear of transient agent errors so crashed agents
+// self-recover to a schedulable state instead of needing a manual board reset.
+export const DEFAULT_TRANSIENT_AGENT_ERROR_AUTO_CLEAR_MAX_ATTEMPTS = 4;
+export const MIN_TRANSIENT_AGENT_ERROR_AUTO_CLEAR_MAX_ATTEMPTS = 1;
+export const MAX_TRANSIENT_AGENT_ERROR_AUTO_CLEAR_MAX_ATTEMPTS = 20;
+
 export interface BackupRetentionPolicy {
   dailyDays: (typeof DAILY_RETENTION_PRESETS)[number];
   weeklyWeeks: (typeof WEEKLY_RETENTION_PRESETS)[number];
@@ -57,6 +63,13 @@ export interface InstanceExperimentalSettings {
   enableIssueGraphLivenessAutoRecovery: boolean;
   issueGraphLivenessAutoRecoveryLookbackHours: number;
   masterRuntimeFailover: MasterRuntimeFailoverSettings;
+  // TWB-305: when enabled, the scheduler tick auto-clears transient agent
+  // errors (adapter process exit, upstream API hiccup, timeout) back to a
+  // schedulable state after a bounded backoff. Hard failures stay `error`.
+  enableTransientAgentErrorAutoClear: boolean;
+  // Max consecutive transient failures auto-cleared before the agent is left
+  // in `error` for human attention (anti-thrash bound).
+  transientAgentErrorAutoClearMaxAttempts: number;
 }
 
 export interface InstanceSettings {
