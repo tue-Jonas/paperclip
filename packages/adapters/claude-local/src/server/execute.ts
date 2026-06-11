@@ -54,6 +54,7 @@ import {
   isClaudeMaxTurnsResult,
   isClaudeTransientUpstreamError,
   isClaudeUnknownSessionError,
+  isPostResultTeardownExit,
 } from "./parse.js";
 import { prepareClaudeConfigSeed } from "./claude-config.js";
 import { resolveClaudeDesiredSkillNames } from "./skills.js";
@@ -880,7 +881,19 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       : null;
     const clearSessionForMaxTurns = isClaudeMaxTurnsResult(parsed);
     const parsedIsError = asBoolean(parsed.is_error, false);
-    const failed = (proc.exitCode ?? 0) !== 0 || parsedIsError;
+    // A terminal result message was parsed. When Claude itself did not flag it as
+    // an error (`is_error === false`), the heartbeat turn completed successfully.
+    // A non-zero exit in that case is a post-result teardown artifact (the CLI
+    // lingers on open handles and is SIGTERM'd → exit 143), not a real failure.
+    // Treating it as failed wrongly flips the agent to `error` status (recovery
+    // derives status from the latest run) and generated recurring "reset agent"
+    // board noise. See isPostResultTeardownExit.
+    const postResultTeardown = isPostResultTeardownExit({
+      exitCode: proc.exitCode,
+      signal: proc.signal,
+      parsedIsError,
+    });
+    const failed = parsedIsError || ((proc.exitCode ?? 0) !== 0 && !postResultTeardown);
     const errorMessage = failed
       ? describeClaudeFailure(parsed) ?? `Claude exited with code ${proc.exitCode ?? -1}`
       : null;

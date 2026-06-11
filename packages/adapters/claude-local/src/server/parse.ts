@@ -401,3 +401,35 @@ export function isClaudeTransientUpstreamError(input: {
   if (!haystack) return false;
   return CLAUDE_TRANSIENT_UPSTREAM_RE.test(haystack);
 }
+
+// Exit codes / signals produced when a process is terminated by a teardown
+// signal rather than exiting on its own: SIGINT (130/2), SIGKILL (137/9),
+// SIGTERM (143/15). 128 + N is the conventional shell encoding of "killed by
+// signal N".
+const TEARDOWN_EXIT_CODES = new Set([130, 137, 143]);
+const TEARDOWN_SIGNALS = new Set(["SIGINT", "SIGKILL", "SIGTERM"]);
+
+/**
+ * True when a non-zero process exit is a *post-result teardown* rather than a
+ * real failure: a terminal Claude result was already parsed with
+ * `is_error === false` (the turn completed), but the CLI exited non-zero because
+ * it was signalled while winding down — e.g. it lingered on open handles
+ * (MCP/plugin sockets) and was SIGTERM'd, yielding exit 143.
+ *
+ * Without this, a fully successful heartbeat is recorded as a failed run, which
+ * flips the agent to `error` status (recovery derives agent status from the
+ * latest run) and generates recurring "reset agent" board noise.
+ *
+ * A genuine error result (`is_error === true`, e.g. max-turns) is never treated
+ * as a teardown — it remains a failure.
+ */
+export function isPostResultTeardownExit(input: {
+  exitCode?: number | null;
+  signal?: string | null;
+  parsedIsError: boolean;
+}): boolean {
+  if (input.parsedIsError) return false;
+  const exitCode = input.exitCode ?? 0;
+  if (TEARDOWN_EXIT_CODES.has(exitCode)) return true;
+  return input.signal != null && TEARDOWN_SIGNALS.has(input.signal);
+}
