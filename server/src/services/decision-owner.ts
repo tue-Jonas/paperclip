@@ -1,6 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import { issueComments, issues } from "@paperclipai/db";
+import { companyMemberships, issueComments, issues } from "@paperclipai/db";
+import { badRequest } from "../errors.js";
 import { instanceSettingsService } from "./instance-settings.js";
 
 const MAX_ISSUE_PARENT_WALK_DEPTH = 50;
@@ -40,18 +41,37 @@ async function findSourceCommentAuthor(db: Db, args: {
   const comment = await db
     .select({
       id: issueComments.id,
-      companyId: issueComments.companyId,
       authorUserId: issueComments.authorUserId,
     })
     .from(issueComments)
-    .where(eq(issueComments.id, args.sourceCommentId))
+    .where(and(eq(issueComments.id, args.sourceCommentId), eq(issueComments.companyId, args.companyId)))
     .then((rows) => rows[0] ?? null);
-  const userId = comment?.companyId === args.companyId
-    ? normalizeUserId(comment.authorUserId)
-    : null;
+  const userId = comment ? normalizeUserId(comment.authorUserId) : null;
   return userId
     ? { userId, source: "source_comment_author", commentId: comment!.id }
     : null;
+}
+
+async function assertActiveCompanyUser(db: Db, args: {
+  companyId: string;
+  userId: string;
+}) {
+  const membership = await db
+    .select({ id: companyMemberships.id })
+    .from(companyMemberships)
+    .where(
+      and(
+        eq(companyMemberships.companyId, args.companyId),
+        eq(companyMemberships.principalType, "user"),
+        eq(companyMemberships.principalId, args.userId),
+        eq(companyMemberships.status, "active"),
+      ),
+    )
+    .then((rows) => rows[0] ?? null);
+
+  if (!membership) {
+    throw badRequest("Explicit decision owner must be an active user in this company");
+  }
 }
 
 async function findRootHumanRequesterForIssue(db: Db, args: {
@@ -122,6 +142,10 @@ export async function resolveDecisionOwnerUserId(db: Db, args: {
 }): Promise<DecisionOwnerResolution> {
   const explicitUserId = normalizeUserId(args.explicitUserId);
   if (explicitUserId) {
+    await assertActiveCompanyUser(db, {
+      companyId: args.companyId,
+      userId: explicitUserId,
+    });
     return { userId: explicitUserId, source: "explicit_user" };
   }
 

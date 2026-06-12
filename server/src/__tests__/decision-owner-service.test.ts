@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
+  companyMemberships,
   companies,
   createDb,
   goals,
@@ -31,6 +32,7 @@ describeEmbeddedPostgres("decision owner resolution", () => {
     await db.delete(issueComments);
     await db.delete(issues);
     await db.delete(goals);
+    await db.delete(companyMemberships);
     await db.delete(instanceSettings);
     await db.delete(companies);
   });
@@ -80,9 +82,22 @@ describeEmbeddedPostgres("decision owner resolution", () => {
     return { companyId, rootIssueId, childIssueId };
   }
 
+  async function seedActiveCompanyUser(companyId: string, userId: string, membershipRole = "owner") {
+    await db.insert(companyMemberships).values({
+      companyId,
+      principalType: "user",
+      principalId: userId,
+      status: "active",
+      membershipRole,
+    });
+  }
+
   it("prefers explicit user, then source comment author, then root human requester", async () => {
     const { companyId, childIssueId } = await seedIssueTree();
     const sourceCommentId = randomUUID();
+    await seedActiveCompanyUser(companyId, "explicit-user");
+    await seedActiveCompanyUser(companyId, "thomas-user");
+    await seedActiveCompanyUser(companyId, "jonas-user");
     await db.insert(issueComments).values({
       id: sourceCommentId,
       companyId,
@@ -139,6 +154,7 @@ describeEmbeddedPostgres("decision owner resolution", () => {
       source: "current_board_actor",
     });
 
+    await seedActiveCompanyUser(companyId, "default-user");
     await instanceSettingsService(db).updateGeneral({
       defaultDecisionOwnerUserId: "default-user",
     });
@@ -148,6 +164,20 @@ describeEmbeddedPostgres("decision owner resolution", () => {
     })).resolves.toMatchObject({
       userId: "default-user",
       source: "configured_default_board_owner",
+    });
+  });
+
+  it("rejects explicit users that are not active company members", async () => {
+    const { companyId, childIssueId } = await seedIssueTree();
+
+    await expect(resolveDecisionOwnerUserId(db, {
+      companyId,
+      explicitUserId: "outsider-user",
+      issueIds: [childIssueId],
+      currentUserId: "current-user",
+    })).rejects.toMatchObject({
+      status: 400,
+      message: "Explicit decision owner must be an active user in this company",
     });
   });
 });
