@@ -3,6 +3,7 @@ import {
   detectClaudeLoginRequired,
   extractClaudeRetryNotBefore,
   isClaudeTransientUpstreamError,
+  isPostResultTeardownExit,
 } from "./parse.js";
 
 describe("isClaudeTransientUpstreamError", () => {
@@ -151,5 +152,36 @@ describe("extractClaudeRetryNotBefore", () => {
     expect(
       extractClaudeRetryNotBefore({ errorMessage: "Overloaded. Try again later." }, new Date()),
     ).toBeNull();
+  });
+});
+
+describe("isPostResultTeardownExit", () => {
+  it("treats exit 143 (SIGTERM teardown) after a successful result as teardown, not failure", () => {
+    // Regression: DevOps/CTO heartbeats completed (subtype=success, is_error=false)
+    // but the CLI lingered and was SIGTERM'd → exit 143. These were recorded as
+    // failed/claude_transient_upstream and flipped the agent to `error` status.
+    expect(isPostResultTeardownExit({ exitCode: 143, signal: null, parsedIsError: false })).toBe(true);
+  });
+
+  it("recognizes SIGINT (130) and SIGKILL (137) teardown exit codes", () => {
+    expect(isPostResultTeardownExit({ exitCode: 130, signal: null, parsedIsError: false })).toBe(true);
+    expect(isPostResultTeardownExit({ exitCode: 137, signal: null, parsedIsError: false })).toBe(true);
+  });
+
+  it("recognizes teardown via the signal field when exitCode is null", () => {
+    expect(isPostResultTeardownExit({ exitCode: null, signal: "SIGTERM", parsedIsError: false })).toBe(true);
+  });
+
+  it("does NOT treat a clean exit (0) as teardown", () => {
+    expect(isPostResultTeardownExit({ exitCode: 0, signal: null, parsedIsError: false })).toBe(false);
+  });
+
+  it("does NOT treat a genuine non-teardown failure exit (1) as teardown", () => {
+    expect(isPostResultTeardownExit({ exitCode: 1, signal: null, parsedIsError: false })).toBe(false);
+  });
+
+  it("never masks a real error result (is_error=true) even on a teardown exit code", () => {
+    // e.g. max-turns is reported with is_error=true; it must stay a failure.
+    expect(isPostResultTeardownExit({ exitCode: 143, signal: "SIGTERM", parsedIsError: true })).toBe(false);
   });
 });
