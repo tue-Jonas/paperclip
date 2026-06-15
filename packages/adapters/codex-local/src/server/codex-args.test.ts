@@ -91,7 +91,7 @@ describe("buildCodexExecArgs", () => {
 
   it("ignores fast mode for unsupported models", () => {
     const result = buildCodexExecArgs({
-      model: "gpt-5.5",
+      model: "gpt-5.3-codex-spark",
       fastMode: true,
     });
 
@@ -104,7 +104,7 @@ describe("buildCodexExecArgs", () => {
       "exec",
       "--json",
       "--model",
-      "gpt-5.5",
+      "gpt-5.3-codex-spark",
       "-",
     ]);
   });
@@ -117,12 +117,16 @@ describe("buildCodexExecArgs", () => {
 
     expect(result.model).toBe("gpt-5.5");
     expect(result.fastModeRequested).toBe(true);
-    expect(result.fastModeApplied).toBe(false);
+    expect(result.fastModeApplied).toBe(true);
     expect(result.args).toEqual([
       "exec",
       "--json",
       "--model",
       "gpt-5.5",
+      "-c",
+      'service_tier="fast"',
+      "-c",
+      "features.fast_mode=true",
       "-",
     ]);
   });
