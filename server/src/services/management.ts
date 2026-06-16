@@ -1,17 +1,31 @@
 import { alias } from "drizzle-orm/pg-core";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import {
+  activityLog,
   agents,
   approvals,
   companies,
   heartbeatRuns,
+  issueComments,
   issueRecoveryActions,
   issueRelations,
   issues,
   projects,
+  routineRuns,
+  routines,
 } from "@paperclipai/db";
 import type {
+  ManagementAnalyzerAccessSummary,
+  ManagementAnalyzerActionCount,
+  ManagementAnalyzerApprovalEvidence,
+  ManagementAnalyzerBoardActionEvidence,
+  ManagementAnalyzerBoardCommentEvidence,
+  ManagementAnalyzerMetricSummary,
+  ManagementAnalyzerRoutineRunEvidence,
+  ManagementAnalyzerRunEvidence,
+  ManagementAnalyzerSnapshotResponse,
+  ManagementAnalyzerStatusChangeEvidence,
   ManagementAgentSummary,
   ManagementApprovalSummary,
   ManagementCompanyDetailResponse,
@@ -32,6 +46,9 @@ const TERMINAL_ISSUE_STATUSES = new Set(["done", "cancelled"]);
 const DETAIL_AGENT_LIMIT = 25;
 const DETAIL_PROJECT_LIMIT = 25;
 const DETAIL_APPROVAL_LIMIT = 10;
+const DEFAULT_STALE_WINDOW_HOURS = 24 * 3;
+const ATTENTION_RUN_LIVENESS_STATES = ["blocked", "failed", "needs_followup", "empty_response"] as const;
+const FAILED_HEARTBEAT_RUN_STATUSES = ["failed", "timed_out", "cancelled"] as const;
 
 type CompanyCountRow = {
   companyId: string;
@@ -92,6 +109,81 @@ function asNumber(value: unknown) {
 function asDate(value: Date | string | null | undefined) {
   if (!value) return null;
   return value instanceof Date ? value : new Date(value);
+}
+
+function truncateExcerpt(text: string | null | undefined, max: number) {
+  const normalized = (text ?? "").replace(/\s+/g, " ").trim();
+  if (!normalized) return null;
+  return normalized.length <= max ? normalized : `${normalized.slice(0, max - 1)}...`;
+}
+
+function issueAppPath(identifier: string | null) {
+  if (!identifier) return null;
+  const prefix = identifier.split("-")[0]?.trim();
+  if (!prefix) return null;
+  return `/${prefix}/issues/${identifier}`;
+}
+
+function issueApiPath(issueId: string) {
+  return `/api/issues/${issueId}`;
+}
+
+function commentApiPath(issueId: string, commentId: string) {
+  return `/api/issues/${issueId}/comments/${commentId}`;
+}
+
+function approvalApiPath(approvalId: string) {
+  return `/api/approvals/${approvalId}`;
+}
+
+function runIssuesApiPath(runId: string) {
+  return `/api/heartbeat-runs/${runId}/issues`;
+}
+
+function routineRunsApiPath(routineId: string) {
+  return `/api/routines/${routineId}/runs`;
+}
+
+function summarizeApprovalPayloadForAnalyzer(payload: Record<string, unknown> | null | undefined) {
+  return summarizeApprovalPayload(payload);
+}
+
+function summarizeActivityDetails(details: Record<string, unknown> | null | undefined) {
+  if (!details || typeof details !== "object" || Array.isArray(details)) return null;
+  const summary: Record<string, unknown> = {};
+  for (const key of [
+    "status",
+    "assigneeAgentId",
+    "assigneeUserId",
+    "source",
+    "interactionKind",
+    "interactionStatus",
+    "requestedByAgentId",
+    "requesterAgentId",
+    "decisionOwnerResolutionSource",
+  ] as const) {
+    const value = details[key];
+    if (value !== undefined && value !== null && value !== "") {
+      summary[key] = value;
+    }
+  }
+  const previous =
+    details._previous && typeof details._previous === "object" && !Array.isArray(details._previous)
+      ? (details._previous as Record<string, unknown>)
+      : null;
+  if (previous) {
+    const previousSummary: Record<string, unknown> = {};
+    for (const key of ["status", "assigneeAgentId", "assigneeUserId"] as const) {
+      const value = previous[key];
+      if (value !== undefined && value !== null && value !== "") {
+        previousSummary[key] = value;
+      }
+    }
+    if (Object.keys(previousSummary).length > 0) {
+      summary.previous = previousSummary;
+    }
+  }
+  return Object.keys(summary).length > 0 ? summary : null;
 }
 
 function toCompanyHealth(summary: ManagementCompanySummary): ManagementCompanyHealthSummary {
@@ -235,6 +327,407 @@ export function managementService(db: Db) {
         updatedAt: row.updatedAt,
       };
     });
+  }
+
+  async function getCompanyAnalyzerSnapshot(
+    companyId: string,
+    input: {
+      windowHours: number;
+      evidenceLimit: number;
+      access: ManagementAnalyzerAccessSummary;
+    },
+  ): Promise<ManagementAnalyzerSnapshotResponse | null> {
+    const [companySummary] = await listCompanySummaries([companyId]);
+    if (!companySummary) return null;
+
+    const until = new Date();
+    const since = new Date(until.getTime() - input.windowHours * 60 * 60 * 1000);
+    const staleBefore = new Date(until.getTime() - DEFAULT_STALE_WINDOW_HOURS * 60 * 60 * 1000);
+
+    const [
+      currentIssueRows,
+      recentActivityRows,
+      boardCommentRows,
+      heartbeatRunRows,
+      routineRunRows,
+      boardCommentEvidenceRows,
+      approvalEvidenceRows,
+      blockedIssues,
+    ] = await Promise.all([
+      db
+        .select({
+          id: issues.id,
+          status: issues.status,
+          createdAt: issues.createdAt,
+          updatedAt: issues.updatedAt,
+        })
+        .from(issues)
+        .where(and(eq(issues.companyId, companyId), isNull(issues.hiddenAt))),
+      db
+        .select({
+          activityId: activityLog.id,
+          action: activityLog.action,
+          actorType: activityLog.actorType,
+          actorId: activityLog.actorId,
+          entityType: activityLog.entityType,
+          entityId: activityLog.entityId,
+          details: activityLog.details,
+          createdAt: activityLog.createdAt,
+        })
+        .from(activityLog)
+        .where(and(eq(activityLog.companyId, companyId), gte(activityLog.createdAt, since)))
+        .orderBy(desc(activityLog.createdAt)),
+      db
+        .select({
+          commentId: issueComments.id,
+        })
+        .from(issueComments)
+        .where(and(
+          eq(issueComments.companyId, companyId),
+          gte(issueComments.createdAt, since),
+          isNull(issueComments.deletedAt),
+          sql`${issueComments.authorUserId} is not null`,
+        )),
+      db
+        .select({
+          runId: heartbeatRuns.id,
+          status: heartbeatRuns.status,
+          livenessState: heartbeatRuns.livenessState,
+          invocationSource: heartbeatRuns.invocationSource,
+          startedAt: heartbeatRuns.startedAt,
+          finishedAt: heartbeatRuns.finishedAt,
+          resultJson: heartbeatRuns.resultJson,
+          contextSnapshot: heartbeatRuns.contextSnapshot,
+          createdAt: heartbeatRuns.createdAt,
+        })
+        .from(heartbeatRuns)
+        .where(and(eq(heartbeatRuns.companyId, companyId), gte(heartbeatRuns.createdAt, since)))
+        .orderBy(desc(heartbeatRuns.createdAt)),
+      db
+        .select({
+          routineRunId: routineRuns.id,
+          routineId: routineRuns.routineId,
+          routineTitle: routines.title,
+          status: routineRuns.status,
+          source: routineRuns.source,
+          triggeredAt: routineRuns.triggeredAt,
+          failureReason: routineRuns.failureReason,
+          linkedIssueId: routineRuns.linkedIssueId,
+          linkedIssueIdentifier: issues.identifier,
+          linkedIssueTitle: issues.title,
+          createdAt: routineRuns.createdAt,
+        })
+        .from(routineRuns)
+        .innerJoin(routines, eq(routines.id, routineRuns.routineId))
+        .leftJoin(issues, eq(issues.id, routineRuns.linkedIssueId))
+        .where(and(eq(routineRuns.companyId, companyId), gte(routineRuns.createdAt, since)))
+        .orderBy(desc(routineRuns.createdAt)),
+      db
+        .select({
+          commentId: issueComments.id,
+          issueId: issueComments.issueId,
+          issueIdentifier: issues.identifier,
+          issueTitle: issues.title,
+          createdAt: issueComments.createdAt,
+          authorUserId: issueComments.authorUserId,
+          body: issueComments.body,
+        })
+        .from(issueComments)
+        .innerJoin(issues, eq(issues.id, issueComments.issueId))
+        .where(and(
+          eq(issueComments.companyId, companyId),
+          eq(issues.companyId, companyId),
+          isNull(issueComments.deletedAt),
+          gte(issueComments.createdAt, since),
+          sql`${issueComments.authorUserId} is not null`,
+        ))
+        .orderBy(desc(issueComments.createdAt))
+        .limit(input.evidenceLimit),
+      db
+        .select({
+          approvalId: approvals.id,
+          type: approvals.type,
+          status: approvals.status,
+          requestedByAgentId: approvals.requestedByAgentId,
+          requestedByUserId: approvals.requestedByUserId,
+          decidedByUserId: approvals.decidedByUserId,
+          createdAt: approvals.createdAt,
+          decidedAt: approvals.decidedAt,
+          payload: approvals.payload,
+        })
+        .from(approvals)
+        .where(and(eq(approvals.companyId, companyId), gte(approvals.updatedAt, since)))
+        .orderBy(desc(approvals.updatedAt))
+        .limit(input.evidenceLimit),
+      listCompanyIssues(companyId, {
+        status: "blocked",
+        limit: input.evidenceLimit,
+        offset: 0,
+      }).then((result) => result.issues),
+    ]);
+
+    const boardActionBreakdownMap = new Map<string, number>();
+    const approvalActionCountByAction = new Map<string, number>();
+    for (const row of recentActivityRows) {
+      if (row.actorType === "user" && row.action !== "issue.comment_added") {
+        boardActionBreakdownMap.set(row.action, (boardActionBreakdownMap.get(row.action) ?? 0) + 1);
+      }
+      if (["approval.created", "approval.approved", "approval.rejected", "approval.revision_requested"].includes(row.action)) {
+        approvalActionCountByAction.set(row.action, (approvalActionCountByAction.get(row.action) ?? 0) + 1);
+      }
+    }
+    const boardActionBreakdown: ManagementAnalyzerActionCount[] = Array.from(boardActionBreakdownMap.entries())
+      .map(([action, count]) => ({ action, count }))
+      .sort((left, right) => right.count - left.count || left.action.localeCompare(right.action));
+    const boardActionCount = boardActionBreakdown.reduce((sum, row) => sum + row.count, 0);
+
+    const issueUpdateActivities = recentActivityRows.filter((row) => row.entityType === "issue" && row.action === "issue.updated");
+    const statusChangeRows = issueUpdateActivities.filter((row) => {
+      const details =
+        row.details && typeof row.details === "object" && !Array.isArray(row.details)
+          ? row.details as Record<string, unknown>
+          : {};
+      const previous =
+        details._previous && typeof details._previous === "object" && !Array.isArray(details._previous)
+          ? details._previous as Record<string, unknown>
+          : {};
+      return String(details.status ?? "") !== String(previous.status ?? "") ||
+        String(details.assigneeAgentId ?? "") !== String(previous.assigneeAgentId ?? "") ||
+        String(details.assigneeUserId ?? "") !== String(previous.assigneeUserId ?? "");
+    });
+    const statusChangeEvidenceRows = statusChangeRows.slice(0, input.evidenceLimit);
+    const attentionRunRows = heartbeatRunRows
+      .filter((row) =>
+        ATTENTION_RUN_LIVENESS_STATES.includes((row.livenessState ?? "") as typeof ATTENTION_RUN_LIVENESS_STATES[number]) ||
+        FAILED_HEARTBEAT_RUN_STATUSES.includes(row.status as typeof FAILED_HEARTBEAT_RUN_STATUSES[number]))
+      .slice(0, input.evidenceLimit);
+    const routineRunEvidenceRows = routineRunRows.slice(0, input.evidenceLimit);
+
+    const issueIdsForActionEvidence = Array.from(new Set([
+      ...recentActivityRows
+        .filter((row) => row.actorType === "user" && row.action !== "issue.comment_added" && row.entityType === "issue")
+        .slice(0, input.evidenceLimit)
+        .map((row) => row.entityId),
+      ...statusChangeEvidenceRows.map((row) => row.entityId),
+      ...attentionRunRows
+        .map((row) => readIssueIdFromRunContext(row.contextSnapshot))
+        .filter((value): value is string => Boolean(value)),
+    ]));
+    const evidenceIssues = issueIdsForActionEvidence.length === 0
+      ? []
+      : await db
+        .select({
+          id: issues.id,
+          identifier: issues.identifier,
+          title: issues.title,
+        })
+        .from(issues)
+        .where(and(eq(issues.companyId, companyId), inArray(issues.id, issueIdsForActionEvidence)));
+    const evidenceIssueById = new Map(evidenceIssues.map((row) => [row.id, row]));
+
+    const boardComments: ManagementAnalyzerBoardCommentEvidence[] = boardCommentEvidenceRows.map((row) => ({
+      commentId: row.commentId,
+      issueId: row.issueId,
+      issueIdentifier: row.issueIdentifier,
+      issueTitle: row.issueTitle,
+      createdAt: row.createdAt,
+      authorUserId: row.authorUserId,
+      bodyExcerpt: truncateExcerpt(row.body, input.access.excerptPolicy === "full" ? 280 : 140),
+      issueApiPath: issueApiPath(row.issueId),
+      commentApiPath: commentApiPath(row.issueId, row.commentId),
+      issueAppPath: issueAppPath(row.issueIdentifier),
+    }));
+
+    const boardActions: ManagementAnalyzerBoardActionEvidence[] = recentActivityRows
+      .filter((row) => row.actorType === "user" && row.action !== "issue.comment_added")
+      .slice(0, input.evidenceLimit)
+      .map((row) => {
+        const linkedIssue = row.entityType === "issue" ? evidenceIssueById.get(row.entityId) ?? null : null;
+        return {
+          activityId: row.activityId,
+          action: row.action,
+          createdAt: row.createdAt,
+          entityType: row.entityType,
+          entityId: row.entityId,
+          issueId: linkedIssue?.id ?? null,
+          issueIdentifier: linkedIssue?.identifier ?? null,
+          issueTitle: linkedIssue?.title ?? null,
+          detailsSummary: summarizeActivityDetails(row.details),
+          issueApiPath: linkedIssue ? issueApiPath(linkedIssue.id) : null,
+          issueAppPath: linkedIssue ? issueAppPath(linkedIssue.identifier) : null,
+        };
+      });
+
+    const statusChanges: ManagementAnalyzerStatusChangeEvidence[] = statusChangeEvidenceRows.map((row) => {
+      const linkedIssue = evidenceIssueById.get(row.entityId);
+      const details =
+        row.details && typeof row.details === "object" && !Array.isArray(row.details)
+          ? row.details as Record<string, unknown>
+          : {};
+      const previous =
+        details._previous && typeof details._previous === "object" && !Array.isArray(details._previous)
+          ? details._previous as Record<string, unknown>
+          : {};
+      return {
+        activityId: row.activityId,
+        createdAt: row.createdAt,
+        issueId: row.entityId,
+        issueIdentifier: linkedIssue?.identifier ?? null,
+        issueTitle: linkedIssue?.title ?? "Issue update",
+        actorType: row.actorType as ManagementAnalyzerStatusChangeEvidence["actorType"],
+        actorId: row.actorId,
+        status: typeof details.status === "string" ? details.status : null,
+        previousStatus: typeof previous.status === "string" ? previous.status : null,
+        assigneeAgentId: typeof details.assigneeAgentId === "string" ? details.assigneeAgentId : null,
+        previousAssigneeAgentId: typeof previous.assigneeAgentId === "string" ? previous.assigneeAgentId : null,
+        assigneeUserId: typeof details.assigneeUserId === "string" ? details.assigneeUserId : null,
+        previousAssigneeUserId: typeof previous.assigneeUserId === "string" ? previous.assigneeUserId : null,
+        issueApiPath: issueApiPath(row.entityId),
+        issueAppPath: issueAppPath(linkedIssue?.identifier ?? null),
+      };
+    });
+
+    const approvalEvidence: ManagementAnalyzerApprovalEvidence[] = approvalEvidenceRows.map((row) => ({
+      approvalId: row.approvalId,
+      type: row.type,
+      status: row.status as ManagementAnalyzerApprovalEvidence["status"],
+      requestedByAgentId: row.requestedByAgentId,
+      requestedByUserId: row.requestedByUserId,
+      decidedByUserId: row.decidedByUserId,
+      createdAt: row.createdAt,
+      decidedAt: row.decidedAt,
+      payloadSummary: summarizeApprovalPayloadForAnalyzer(row.payload),
+      approvalApiPath: approvalApiPath(row.approvalId),
+    }));
+
+    const attentionRuns: ManagementAnalyzerRunEvidence[] = attentionRunRows.map((row) => {
+      const linkedIssueId = readIssueIdFromRunContext(row.contextSnapshot);
+      const linkedIssue = linkedIssueId ? evidenceIssueById.get(linkedIssueId) ?? null : null;
+      return {
+        runId: row.runId,
+        status: row.status as ManagementAnalyzerRunEvidence["status"],
+        livenessState: row.livenessState as ManagementAnalyzerRunEvidence["livenessState"],
+        invocationSource: row.invocationSource,
+        startedAt: row.startedAt,
+        finishedAt: row.finishedAt,
+        issueId: linkedIssueId,
+        issueIdentifier: linkedIssue?.identifier ?? null,
+        issueTitle: linkedIssue?.title ?? null,
+        resultSummary: summarizeHeartbeatRunResultJson(row.resultJson),
+        runIssuesApiPath: runIssuesApiPath(row.runId),
+        issueApiPath: linkedIssueId ? issueApiPath(linkedIssueId) : null,
+        issueAppPath: issueAppPath(linkedIssue?.identifier ?? null),
+      };
+    });
+
+    const routineRunsEvidence: ManagementAnalyzerRoutineRunEvidence[] = routineRunEvidenceRows.map((row) => ({
+      routineRunId: row.routineRunId,
+      routineId: row.routineId,
+      routineTitle: row.routineTitle,
+      status: row.status,
+      source: row.source,
+      triggeredAt: row.triggeredAt,
+      failureReason: row.failureReason,
+      linkedIssueId: row.linkedIssueId,
+      linkedIssueIdentifier: row.linkedIssueIdentifier,
+      linkedIssueTitle: row.linkedIssueTitle,
+      routineRunsApiPath: routineRunsApiPath(row.routineId),
+      issueApiPath: row.linkedIssueId ? issueApiPath(row.linkedIssueId) : null,
+      issueAppPath: issueAppPath(row.linkedIssueIdentifier),
+    }));
+
+    const metrics: ManagementAnalyzerMetricSummary = {
+      openIssueCount: companySummary.openIssueCount,
+      blockedIssueCount: companySummary.blockedIssueCount,
+      staleOpenIssueCount: currentIssueRows.filter((row) =>
+        row.status !== "done" && row.status !== "cancelled" && row.updatedAt < staleBefore).length,
+      issuesCreated: currentIssueRows.filter((row) => row.createdAt >= since).length,
+      issuesCompleted: issueUpdateActivities.filter((row) => {
+        const details = row.details as Record<string, unknown> | null;
+        const previous =
+          details?._previous && typeof details._previous === "object" && !Array.isArray(details._previous)
+            ? details._previous as Record<string, unknown>
+            : {};
+        return details?.status === "done" && previous.status !== "done";
+      }).length,
+      issuesMovedToBlocked: issueUpdateActivities.filter((row) => {
+        const details = row.details as Record<string, unknown> | null;
+        const previous =
+          details?._previous && typeof details._previous === "object" && !Array.isArray(details._previous)
+            ? details._previous as Record<string, unknown>
+            : {};
+        return details?.status === "blocked" && previous.status !== "blocked";
+      }).length,
+      issuesCancelled: issueUpdateActivities.filter((row) => {
+        const details = row.details as Record<string, unknown> | null;
+        const previous =
+          details?._previous && typeof details._previous === "object" && !Array.isArray(details._previous)
+            ? details._previous as Record<string, unknown>
+            : {};
+        return details?.status === "cancelled" && previous.status !== "cancelled";
+      }).length,
+      issuesReopened: issueUpdateActivities.filter((row) => {
+        const details = row.details as Record<string, unknown> | null;
+        const previous =
+          details?._previous && typeof details._previous === "object" && !Array.isArray(details._previous)
+            ? details._previous as Record<string, unknown>
+            : {};
+        return ["todo", "in_progress", "in_review"].includes(String(details?.status ?? "")) &&
+          ["done", "cancelled", "blocked"].includes(String(previous.status ?? ""));
+      }).length,
+      statusChangeCount: statusChangeRows.filter((row) => {
+        const details = row.details as Record<string, unknown> | null;
+        const previous =
+          details?._previous && typeof details._previous === "object" && !Array.isArray(details._previous)
+            ? details._previous as Record<string, unknown>
+            : {};
+        return String(details?.status ?? "") !== String(previous.status ?? "");
+      }).length,
+      assignmentChangeCount: statusChangeRows.filter((row) => {
+        const details = row.details as Record<string, unknown> | null;
+        const previous =
+          details?._previous && typeof details._previous === "object" && !Array.isArray(details._previous)
+            ? details._previous as Record<string, unknown>
+            : {};
+        return String(details?.assigneeAgentId ?? "") !== String(previous.assigneeAgentId ?? "") ||
+          String(details?.assigneeUserId ?? "") !== String(previous.assigneeUserId ?? "");
+      }).length,
+      boardCommentCount: boardCommentRows.length,
+      boardActionCount,
+      approvalCreatedCount: approvalActionCountByAction.get("approval.created") ?? 0,
+      approvalApprovedCount: approvalActionCountByAction.get("approval.approved") ?? 0,
+      approvalRejectedCount: approvalActionCountByAction.get("approval.rejected") ?? 0,
+      approvalRevisionRequestedCount: approvalActionCountByAction.get("approval.revision_requested") ?? 0,
+      activeApprovalCount: companySummary.pendingApprovalCount,
+      heartbeatRunCount: heartbeatRunRows.length,
+      attentionHeartbeatRunCount: attentionRunRows.length,
+      failedHeartbeatRunCount: heartbeatRunRows.filter((row) =>
+        FAILED_HEARTBEAT_RUN_STATUSES.includes(row.status as typeof FAILED_HEARTBEAT_RUN_STATUSES[number])).length,
+      routineRunCount: routineRunRows.length,
+      failedRoutineRunCount: routineRunRows.filter((row) => row.status === "failed").length,
+    };
+
+    return {
+      company: companySummary,
+      health: toCompanyHealth(companySummary),
+      window: {
+        since,
+        until,
+        hours: input.windowHours,
+      },
+      access: input.access,
+      metrics,
+      boardActionBreakdown,
+      evidence: {
+        boardComments,
+        boardActions,
+        statusChanges,
+        approvals: approvalEvidence,
+        attentionRuns,
+        routineRuns: routineRunsEvidence,
+        blockedIssues,
+      },
+    };
   }
 
   async function getCompanyDetail(
@@ -569,6 +1062,7 @@ export function managementService(db: Db) {
   }
 
   return {
+    getCompanyAnalyzerSnapshot,
     getCompanyDetail,
     listCompanyIssues,
     listCompanyRuns,

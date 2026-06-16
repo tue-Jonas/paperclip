@@ -28,8 +28,10 @@ export {
   type UpdateCompanyBranding,
 } from "./company.js";
 export {
+  managementAnalyzerSnapshotQuerySchema,
   managementIssueListQuerySchema,
   managementRunListQuerySchema,
+  type ManagementAnalyzerSnapshotQuery,
   type ManagementIssueListQuery,
   type ManagementRunListQuery,
 } from "./management.js";

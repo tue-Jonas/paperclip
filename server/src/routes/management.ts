@@ -7,11 +7,12 @@ import type {
   ManagementProjectSummary,
 } from "@paperclipai/shared";
 import {
+  managementAnalyzerSnapshotQuerySchema,
   managementIssueListQuerySchema,
   managementRunListQuerySchema,
 } from "@paperclipai/shared";
-import { accessService, managementService } from "../services/index.js";
-import { assertBoardOrAgent } from "./authz.js";
+import { accessService, logActivity, managementService } from "../services/index.js";
+import { assertBoardOrAgent, getActorInfo } from "./authz.js";
 
 export function managementRoutes(db: Db) {
   const router = Router();
@@ -35,6 +36,50 @@ export function managementRoutes(db: Db) {
     if (decision.allowed) return decision;
     res.status(403).json({ error: "Company is outside this actor's management read boundary" });
     return null;
+  }
+
+  async function logCrossCompanyAnalyzerRead(params: {
+    req: Request;
+    companyId: string;
+    decision: Awaited<ReturnType<typeof companyReadAllowed>>;
+    windowHours: number;
+    evidenceLimit: number;
+    excerptPolicy: "full" | "redacted";
+  }) {
+    if (!params.decision.allowed || !params.decision.crossCompanyGrant) return;
+    const actor = getActorInfo(params.req);
+    const details = {
+      sourceCompanyId: params.decision.crossCompanyGrant.sourceCompanyId,
+      targetCompanyId: params.companyId,
+      grantId: params.decision.crossCompanyGrant.id,
+      capability: params.decision.crossCompanyGrant.capability,
+      windowHours: params.windowHours,
+      evidenceLimit: params.evidenceLimit,
+      excerptPolicy: params.excerptPolicy,
+      path: params.req.originalUrl,
+    };
+    await logActivity(db, {
+      companyId: params.decision.crossCompanyGrant.sourceCompanyId,
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      agentId: actor.agentId,
+      runId: actor.runId,
+      action: "cross_company_analyzer_snapshot.read",
+      entityType: "company",
+      entityId: params.companyId,
+      details,
+    });
+    await logActivity(db, {
+      companyId: params.companyId,
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      agentId: actor.agentId,
+      runId: actor.runId,
+      action: "cross_company_analyzer_snapshot.read",
+      entityType: "company",
+      entityId: params.companyId,
+      details,
+    });
   }
 
   async function listAccessibleCompanyIds(req: Request) {
@@ -116,6 +161,40 @@ export function managementRoutes(db: Db) {
       issues: await filterIssuesForActor(req, result.issues),
       nextOffset: result.nextOffset,
     });
+  });
+
+  router.get("/management/companies/:companyId/analyzer-snapshot", async (req, res) => {
+    assertBoardOrAgent(req);
+    const companyId = req.params.companyId as string;
+    const decision = await assertCompanyReadAllowed(req, res, companyId);
+    if (!decision) return;
+
+    const query = managementAnalyzerSnapshotQuerySchema.parse(req.query);
+    const access = {
+      mode: isCrossCompanyGrantRead(decision) ? "cross_company_grant" : "same_company",
+      excerptPolicy: isCrossCompanyGrantRead(decision) ? "redacted" : "full",
+      grantId: decision.crossCompanyGrant?.id ?? null,
+    } as const;
+    await logCrossCompanyAnalyzerRead({
+      req,
+      companyId,
+      decision,
+      windowHours: query.windowHours,
+      evidenceLimit: query.evidenceLimit,
+      excerptPolicy: access.excerptPolicy,
+    });
+
+    const snapshot = await management.getCompanyAnalyzerSnapshot(companyId, {
+      windowHours: query.windowHours,
+      evidenceLimit: query.evidenceLimit,
+      access,
+    });
+    if (!snapshot) {
+      res.status(404).json({ error: "Company not found" });
+      return;
+    }
+
+    res.json(snapshot);
   });
 
   router.get("/management/companies/:companyId/runs", async (req, res) => {

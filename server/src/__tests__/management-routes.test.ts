@@ -4,16 +4,20 @@ import request from "supertest";
 import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
+  activityLog,
   agents,
   approvals,
   companies,
   createDb,
   crossCompanyAgentGrants,
   heartbeatRuns,
+  issueComments,
   issueRecoveryActions,
   issueRelations,
   issues,
   projects,
+  routineRuns,
+  routines,
 } from "@paperclipai/db";
 import {
   getEmbeddedPostgresTestSupport,
@@ -128,6 +132,10 @@ describeEmbeddedPostgres("management routes", () => {
   }, 20_000);
 
   afterEach(async () => {
+    await db.delete(activityLog);
+    await db.delete(issueComments);
+    await db.delete(routineRuns);
+    await db.delete(routines);
     await db.delete(issueRecoveryActions);
     await db.delete(issueRelations);
     await db.delete(approvals);
@@ -154,6 +162,19 @@ describeEmbeddedPostgres("management routes", () => {
     const targetCompany = await seedCompany(db, undefined, "Target");
     const sourceAgent = await seedAgent(db, sourceCompany.id, "Source");
     const targetAgent = await seedAgent(db, targetCompany.id, "Target", "running");
+    const sourceRun = await db
+      .insert(heartbeatRuns)
+      .values({
+        companyId: sourceCompany.id,
+        agentId: sourceAgent.id,
+        status: "succeeded",
+        invocationSource: "assignment",
+        livenessState: "completed",
+        startedAt: new Date("2026-06-16T17:55:00.000Z"),
+        finishedAt: new Date("2026-06-16T17:58:00.000Z"),
+      })
+      .returning()
+      .then((rows) => rows[0]!);
     const targetProject = await seedProject(db, targetCompany.id, "Ops");
     await seedProject(db, targetCompany.id, "Completed", "completed");
     const blockerIssue = await seedIssue(db, {
@@ -226,6 +247,93 @@ describeEmbeddedPostgres("management routes", () => {
         secret: "must-not-leak",
       },
     });
+    const rejectedApproval = await db
+      .insert(approvals)
+      .values({
+        companyId: targetCompany.id,
+        type: "request_board_approval",
+        requestedByAgentId: targetAgent.id,
+        requestedByUserId: "board-user",
+        status: "rejected",
+        decidedByUserId: "board-user",
+        decidedAt: new Date("2026-06-16T18:18:00.000Z"),
+        payload: {
+          title: "Reject noisy rollout",
+          summary: "Need a narrower rollout",
+          recommendedAction: "Revise the scope first",
+        },
+      })
+      .returning()
+      .then((rows) => rows[0]!);
+
+    await db.insert(issueComments).values({
+      companyId: targetCompany.id,
+      issueId: blockedIssue.id,
+      authorType: "user",
+      authorUserId: "board-user",
+      body:
+        "Board note: blocker reports need clearer next actions and links so the daily analyzer can spot recurring ownership gaps quickly.",
+      createdAt: new Date("2026-06-16T18:12:00.000Z"),
+      updatedAt: new Date("2026-06-16T18:12:00.000Z"),
+    });
+
+    await db.insert(activityLog).values([
+      {
+        companyId: targetCompany.id,
+        actorType: "user",
+        actorId: "board-user",
+        action: "issue.updated",
+        entityType: "issue",
+        entityId: blockedIssue.id,
+        details: {
+          status: "blocked",
+          assigneeUserId: "reviewer-1",
+          source: "board_triage",
+          _previous: {
+            status: "todo",
+            assigneeUserId: null,
+          },
+        },
+        createdAt: new Date("2026-06-16T18:13:00.000Z"),
+      },
+      {
+        companyId: targetCompany.id,
+        actorType: "user",
+        actorId: "board-user",
+        action: "approval.rejected",
+        entityType: "approval",
+        entityId: rejectedApproval.id,
+        details: {
+          type: rejectedApproval.type,
+        },
+        createdAt: new Date("2026-06-16T18:18:30.000Z"),
+      },
+    ]);
+
+    const routine = await db
+      .insert(routines)
+      .values({
+        companyId: targetCompany.id,
+        projectId: targetProject.id,
+        parentIssueId: blockedIssue.id,
+        title: "Daily self-improvement analyzer",
+        description: "Cross-company rollup",
+        assigneeAgentId: targetAgent.id,
+      })
+      .returning()
+      .then((rows) => rows[0]!);
+
+    await db.insert(routineRuns).values({
+      companyId: targetCompany.id,
+      routineId: routine.id,
+      source: "schedule",
+      status: "failed",
+      triggeredAt: new Date("2026-06-16T18:20:00.000Z"),
+      failureReason: "grant missing",
+      linkedIssueId: blockedIssue.id,
+      createdAt: new Date("2026-06-16T18:20:00.000Z"),
+      updatedAt: new Date("2026-06-16T18:20:00.000Z"),
+    });
 
     await db.insert(crossCompanyAgentGrants).values({
       sourceCompanyId: sourceCompany.id,
@@ -240,6 +348,7 @@ describeEmbeddedPostgres("management routes", () => {
       type: "agent",
       agentId: sourceAgent.id,
       companyId: sourceCompany.id,
+      runId: sourceRun.id,
     });
 
     const companiesRes = await request(app).get("/api/management/companies");
@@ -292,6 +401,98 @@ describeEmbeddedPostgres("management routes", () => {
       .get(`/api/management/companies/${targetCompany.id}/runs`);
     expect(runsRes.status, JSON.stringify(runsRes.body)).toBe(403);
     expect(runsRes.body.error).toContain("management read boundary");
+
+    const analyzerRes = await request(app)
+      .get(`/api/management/companies/${targetCompany.id}/analyzer-snapshot`)
+      .query({ windowHours: 24, evidenceLimit: 5 });
+    expect(analyzerRes.status, JSON.stringify(analyzerRes.body)).toBe(200);
+    expect(analyzerRes.body.access).toMatchObject({
+      mode: "cross_company_grant",
+      excerptPolicy: "redacted",
+    });
+    expect(analyzerRes.body.metrics).toMatchObject({
+      boardCommentCount: 1,
+      boardActionCount: 2,
+      approvalRejectedCount: 1,
+      statusChangeCount: 1,
+      assignmentChangeCount: 1,
+      attentionHeartbeatRunCount: 1,
+      failedRoutineRunCount: 1,
+    });
+    expect(analyzerRes.body.evidence.boardComments).toEqual([
+      expect.objectContaining({
+        issueId: blockedIssue.id,
+        issueApiPath: `/api/issues/${blockedIssue.id}`,
+        commentApiPath: expect.stringContaining(`/api/issues/${blockedIssue.id}/comments/`),
+        bodyExcerpt: expect.stringContaining("Board note: blocker reports"),
+      }),
+    ]);
+    expect(analyzerRes.body.evidence.boardActions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        action: "issue.updated",
+        issueId: blockedIssue.id,
+      }),
+      expect.objectContaining({
+        action: "approval.rejected",
+        entityId: rejectedApproval.id,
+      }),
+    ]));
+    expect(analyzerRes.body.evidence.statusChanges).toEqual([
+      expect.objectContaining({
+        issueId: blockedIssue.id,
+        previousStatus: "todo",
+        status: "blocked",
+        assigneeUserId: "reviewer-1",
+      }),
+    ]);
+    expect(analyzerRes.body.evidence.approvals).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        approvalId: rejectedApproval.id,
+        approvalApiPath: `/api/approvals/${rejectedApproval.id}`,
+      }),
+    ]));
+    expect(analyzerRes.body.evidence.attentionRuns).toEqual([
+      expect.objectContaining({
+        runId: run.id,
+        runIssuesApiPath: `/api/heartbeat-runs/${run.id}/issues`,
+        issueId: blockedIssue.id,
+      }),
+    ]);
+    expect(analyzerRes.body.evidence.routineRuns).toEqual([
+      expect.objectContaining({
+        routineId: routine.id,
+        routineRunsApiPath: `/api/routines/${routine.id}/runs`,
+        linkedIssueId: blockedIssue.id,
+      }),
+    ]);
+
+    const auditRows = await db
+      .select({
+        companyId: activityLog.companyId,
+        runId: activityLog.runId,
+        entityId: activityLog.entityId,
+        details: activityLog.details,
+      })
+      .from(activityLog)
+      .where(eq(activityLog.action, "cross_company_analyzer_snapshot.read"));
+    expect(auditRows).toHaveLength(2);
+    expect(auditRows).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        companyId: sourceCompany.id,
+        runId: sourceRun.id,
+        entityId: targetCompany.id,
+        details: expect.objectContaining({
+          sourceCompanyId: sourceCompany.id,
+          targetCompanyId: targetCompany.id,
+          excerptPolicy: "redacted",
+        }),
+      }),
+      expect.objectContaining({
+        companyId: targetCompany.id,
+        runId: sourceRun.id,
+        entityId: targetCompany.id,
+      }),
+    ]));
 
     const writeRes = await request(app)
       .post(`/api/companies/${targetCompany.id}/approvals`)

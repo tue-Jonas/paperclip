@@ -143,6 +143,158 @@ export interface ManagementRunSummary {
   resultSummary: Record<string, unknown> | null;
 }
 
+export interface ManagementAnalyzerWindow {
+  since: Date;
+  until: Date;
+  hours: number;
+}
+
+export interface ManagementAnalyzerAccessSummary {
+  mode: "same_company" | "cross_company_grant";
+  excerptPolicy: "full" | "redacted";
+  grantId: string | null;
+}
+
+export interface ManagementAnalyzerMetricSummary {
+  openIssueCount: number;
+  blockedIssueCount: number;
+  staleOpenIssueCount: number;
+  issuesCreated: number;
+  issuesCompleted: number;
+  issuesMovedToBlocked: number;
+  issuesCancelled: number;
+  issuesReopened: number;
+  statusChangeCount: number;
+  assignmentChangeCount: number;
+  boardCommentCount: number;
+  boardActionCount: number;
+  approvalCreatedCount: number;
+  approvalApprovedCount: number;
+  approvalRejectedCount: number;
+  approvalRevisionRequestedCount: number;
+  activeApprovalCount: number;
+  heartbeatRunCount: number;
+  attentionHeartbeatRunCount: number;
+  failedHeartbeatRunCount: number;
+  routineRunCount: number;
+  failedRoutineRunCount: number;
+}
+
+export interface ManagementAnalyzerActionCount {
+  action: string;
+  count: number;
+}
+
+export interface ManagementAnalyzerBoardCommentEvidence {
+  commentId: string;
+  issueId: string;
+  issueIdentifier: string | null;
+  issueTitle: string;
+  createdAt: Date;
+  authorUserId: string | null;
+  bodyExcerpt: string | null;
+  issueApiPath: string;
+  commentApiPath: string;
+  issueAppPath: string | null;
+}
+
+export interface ManagementAnalyzerBoardActionEvidence {
+  activityId: string;
+  action: string;
+  createdAt: Date;
+  entityType: string;
+  entityId: string;
+  issueId: string | null;
+  issueIdentifier: string | null;
+  issueTitle: string | null;
+  detailsSummary: Record<string, unknown> | null;
+  issueApiPath: string | null;
+  issueAppPath: string | null;
+}
+
+export interface ManagementAnalyzerStatusChangeEvidence {
+  activityId: string;
+  createdAt: Date;
+  issueId: string;
+  issueIdentifier: string | null;
+  issueTitle: string;
+  actorType: "agent" | "user" | "system" | "plugin";
+  actorId: string;
+  status: string | null;
+  previousStatus: string | null;
+  assigneeAgentId: string | null;
+  previousAssigneeAgentId: string | null;
+  assigneeUserId: string | null;
+  previousAssigneeUserId: string | null;
+  issueApiPath: string;
+  issueAppPath: string | null;
+}
+
+export interface ManagementAnalyzerApprovalEvidence {
+  approvalId: string;
+  type: string;
+  status: ApprovalStatus;
+  requestedByAgentId: string | null;
+  requestedByUserId: string | null;
+  decidedByUserId: string | null;
+  createdAt: Date;
+  decidedAt: Date | null;
+  payloadSummary: Record<string, unknown> | null;
+  approvalApiPath: string;
+}
+
+export interface ManagementAnalyzerRunEvidence {
+  runId: string;
+  status: HeartbeatRunStatus;
+  livenessState: RunLivenessState | null;
+  invocationSource: string;
+  startedAt: Date | null;
+  finishedAt: Date | null;
+  issueId: string | null;
+  issueIdentifier: string | null;
+  issueTitle: string | null;
+  resultSummary: Record<string, unknown> | null;
+  runIssuesApiPath: string;
+  issueApiPath: string | null;
+  issueAppPath: string | null;
+}
+
+export interface ManagementAnalyzerRoutineRunEvidence {
+  routineRunId: string;
+  routineId: string;
+  routineTitle: string;
+  status: string;
+  source: string;
+  triggeredAt: Date;
+  failureReason: string | null;
+  linkedIssueId: string | null;
+  linkedIssueIdentifier: string | null;
+  linkedIssueTitle: string | null;
+  routineRunsApiPath: string;
+  issueApiPath: string | null;
+  issueAppPath: string | null;
+}
+
+export interface ManagementAnalyzerSnapshotEvidence {
+  boardComments: ManagementAnalyzerBoardCommentEvidence[];
+  boardActions: ManagementAnalyzerBoardActionEvidence[];
+  statusChanges: ManagementAnalyzerStatusChangeEvidence[];
+  approvals: ManagementAnalyzerApprovalEvidence[];
+  attentionRuns: ManagementAnalyzerRunEvidence[];
+  routineRuns: ManagementAnalyzerRoutineRunEvidence[];
+  blockedIssues: ManagementIssueSummary[];
+}
+
+export interface ManagementAnalyzerSnapshotResponse {
+  company: ManagementCompanySummary;
+  health: ManagementCompanyHealthSummary;
+  window: ManagementAnalyzerWindow;
+  access: ManagementAnalyzerAccessSummary;
+  metrics: ManagementAnalyzerMetricSummary;
+  boardActionBreakdown: ManagementAnalyzerActionCount[];
+  evidence: ManagementAnalyzerSnapshotEvidence;
+}
+
 export interface ManagementCompanyListResponse {
   companies: ManagementCompanySummary[];
 }

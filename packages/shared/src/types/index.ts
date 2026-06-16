@@ -1,5 +1,17 @@
 export type { Company } from "./company.js";
 export type {
+  ManagementAnalyzerAccessSummary,
+  ManagementAnalyzerActionCount,
+  ManagementAnalyzerApprovalEvidence,
+  ManagementAnalyzerBoardActionEvidence,
+  ManagementAnalyzerBoardCommentEvidence,
+  ManagementAnalyzerMetricSummary,
+  ManagementAnalyzerRoutineRunEvidence,
+  ManagementAnalyzerRunEvidence,
+  ManagementAnalyzerSnapshotEvidence,
+  ManagementAnalyzerSnapshotResponse,
+  ManagementAnalyzerStatusChangeEvidence,
+  ManagementAnalyzerWindow,
   ManagementAgentSummary,
   ManagementApprovalSummary,
   ManagementCompanyDetailResponse,

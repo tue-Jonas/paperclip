@@ -17,3 +17,10 @@ export const managementRunListQuerySchema = z.object({
 });
 
 export type ManagementRunListQuery = z.infer<typeof managementRunListQuerySchema>;
+
+export const managementAnalyzerSnapshotQuerySchema = z.object({
+  windowHours: z.coerce.number().int().min(1).max(24 * 14).optional().default(24),
+  evidenceLimit: z.coerce.number().int().min(1).max(25).optional().default(10),
+});
+
+export type ManagementAnalyzerSnapshotQuery = z.infer<typeof managementAnalyzerSnapshotQuerySchema>;
