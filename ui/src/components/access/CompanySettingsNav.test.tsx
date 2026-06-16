@@ -82,6 +82,8 @@ describe("CompanySettingsNav", () => {
     expect(getCompanySettingsTab("/company/settings/instance/experimental")).toBe("instance-experimental");
     expect(getCompanySettingsTab("/PAP/company/settings/instance/plugins/example")).toBe("instance-plugins");
     expect(getCompanySettingsTab("/company/settings/instance/adapters")).toBe("instance-adapters");
+    expect(getCompanySettingsTab("/company/settings/instance/cross-org")).toBe("instance-cross-org");
+    expect(getCompanySettingsTab("/PAP/company/settings/instance/cross-org")).toBe("instance-cross-org");
   });
 
   it("renders the active tab and navigates when a different tab is selected", async () => {
@@ -110,6 +112,7 @@ describe("CompanySettingsNav", () => {
           { value: "instance-experimental", label: "Instance experimental" },
           { value: "instance-plugins", label: "Instance plugins" },
           { value: "instance-adapters", label: "Instance adapters" },
+          { value: "instance-cross-org", label: "Cross-org ops" },
         ],
       }),
     );

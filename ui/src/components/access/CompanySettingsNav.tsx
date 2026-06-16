@@ -17,6 +17,7 @@ const items = [
   { value: "instance-experimental", label: "Instance experimental", href: `${INSTANCE_SETTINGS_PATH_PREFIX}/experimental` },
   { value: "instance-plugins", label: "Instance plugins", href: `${INSTANCE_SETTINGS_PATH_PREFIX}/plugins` },
   { value: "instance-adapters", label: "Instance adapters", href: `${INSTANCE_SETTINGS_PATH_PREFIX}/adapters` },
+  { value: "instance-cross-org", label: "Cross-org ops", href: `${INSTANCE_SETTINGS_PATH_PREFIX}/cross-org` },
 ] as const;
 
 type CompanySettingsTab = (typeof items)[number]["value"];
@@ -44,6 +45,10 @@ export function getCompanySettingsTab(pathname: string): CompanySettingsTab {
 
   if (pathname.includes(`${INSTANCE_SETTINGS_PATH_PREFIX}/adapters`)) {
     return "instance-adapters";
+  }
+
+  if (pathname.includes(`${INSTANCE_SETTINGS_PATH_PREFIX}/cross-org`)) {
+    return "instance-cross-org";
   }
 
   if (pathname.includes(`${INSTANCE_SETTINGS_PATH_PREFIX}/general`)) {
