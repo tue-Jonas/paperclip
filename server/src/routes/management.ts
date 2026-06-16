@@ -175,15 +175,6 @@ export function managementRoutes(db: Db) {
       excerptPolicy: isCrossCompanyGrantRead(decision) ? "redacted" : "full",
       grantId: decision.crossCompanyGrant?.id ?? null,
     } as const;
-    await logCrossCompanyAnalyzerRead({
-      req,
-      companyId,
-      decision,
-      windowHours: query.windowHours,
-      evidenceLimit: query.evidenceLimit,
-      excerptPolicy: access.excerptPolicy,
-    });
-
     const snapshot = await management.getCompanyAnalyzerSnapshot(companyId, {
       windowHours: query.windowHours,
       evidenceLimit: query.evidenceLimit,
@@ -193,6 +184,15 @@ export function managementRoutes(db: Db) {
       res.status(404).json({ error: "Company not found" });
       return;
     }
+
+    await logCrossCompanyAnalyzerRead({
+      req,
+      companyId,
+      decision,
+      windowHours: query.windowHours,
+      evidenceLimit: query.evidenceLimit,
+      excerptPolicy: access.excerptPolicy,
+    });
 
     res.json(snapshot);
   });

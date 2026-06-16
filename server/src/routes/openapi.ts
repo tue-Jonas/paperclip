@@ -101,6 +101,9 @@ import {
   createCliAuthChallengeSchema,
   resolveCliAuthChallengeSchema,
   createBoardApiKeySchema,
+  createCrossCompanyAgentGrantSchema,
+  listCrossCompanyAgentGrantsQuerySchema,
+  revokeCrossCompanyAgentGrantSchema,
   updateCompanyMemberSchema,
   updateCompanyMemberWithPermissionsSchema,
   archiveCompanyMemberSchema,
@@ -128,6 +131,9 @@ import {
   remoteSecretImportSchema,
   workspaceFileListQuerySchema,
   workspaceFileResourceQuerySchema,
+  managementAnalyzerSnapshotQuerySchema,
+  managementIssueListQuerySchema,
+  managementRunListQuerySchema,
 } from "@paperclipai/shared";
 
 type JsonSchema = Record<string, unknown>;
@@ -582,6 +588,9 @@ const BOARD_ONLY_OPERATIONS = new Set([
 
 const INSTANCE_ADMIN_OPERATIONS = new Set([
   "POST /api/companies",
+  "GET /api/admin/cross-company-agent-grants",
+  "POST /api/admin/cross-company-agent-grants",
+  "POST /api/admin/cross-company-agent-grants/revoke",
   "POST /api/plugins/install",
   "POST /api/instance/database-backups",
   "POST /api/admin/users/{userId}/promote-instance-admin",
@@ -4109,6 +4118,72 @@ registerCurrentRoute({
   path: "/api/board-api-keys/{keyId}",
   tags: ["access"],
   summary: "Revoke a board API key",
+});
+
+registerCurrentRoute({
+  method: "get",
+  path: "/api/admin/cross-company-agent-grants",
+  tags: ["admin"],
+  summary: "List cross-company agent grants",
+  query: listCrossCompanyAgentGrantsQuerySchema,
+  responses: { 200: r.ok(), 401: r.unauthorized, 403: r.forbidden },
+});
+
+registerCurrentRoute({
+  method: "post",
+  path: "/api/admin/cross-company-agent-grants",
+  tags: ["admin"],
+  summary: "Create or update a cross-company agent grant",
+  body: createCrossCompanyAgentGrantSchema,
+  responses: { 201: r.ok(), 400: r.badRequest, 401: r.unauthorized, 403: r.forbidden },
+});
+
+registerCurrentRoute({
+  method: "post",
+  path: "/api/admin/cross-company-agent-grants/revoke",
+  tags: ["admin"],
+  summary: "Revoke a cross-company agent grant",
+  body: revokeCrossCompanyAgentGrantSchema,
+  responses: { 200: r.ok(), 400: r.badRequest, 401: r.unauthorized, 403: r.forbidden, 404: r.notFound },
+});
+
+registerCurrentRoute({
+  method: "get",
+  path: "/api/management/companies",
+  tags: ["management"],
+  summary: "List companies visible to the management actor",
+});
+
+registerCurrentRoute({
+  method: "get",
+  path: "/api/management/companies/{companyId}",
+  tags: ["management"],
+  summary: "Get management company detail",
+});
+
+registerCurrentRoute({
+  method: "get",
+  path: "/api/management/companies/{companyId}/issues",
+  tags: ["management"],
+  summary: "List management issues for a company",
+  query: managementIssueListQuerySchema,
+});
+
+registerCurrentRoute({
+  method: "get",
+  path: "/api/management/companies/{companyId}/analyzer-snapshot",
+  tags: ["management"],
+  summary: "Get an analyzer snapshot for a company",
+  query: managementAnalyzerSnapshotQuerySchema,
+});
+
+registerCurrentRoute({
+  method: "get",
+  path: "/api/management/companies/{companyId}/runs",
+  tags: ["management"],
+  summary: "List management heartbeat runs for a company",
+  query: managementRunListQuerySchema,
+  responses: { 200: r.ok(), 400: r.badRequest, 401: r.unauthorized, 403: r.forbidden, 404: r.notFound },
 });
 
 for (const route of [

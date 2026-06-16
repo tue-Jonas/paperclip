@@ -1,5 +1,5 @@
 import { alias } from "drizzle-orm/pg-core";
-import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import {
   activityLog,
@@ -47,8 +47,6 @@ const DETAIL_AGENT_LIMIT = 25;
 const DETAIL_PROJECT_LIMIT = 25;
 const DETAIL_APPROVAL_LIMIT = 10;
 const DEFAULT_STALE_WINDOW_HOURS = 24 * 3;
-const ATTENTION_RUN_LIVENESS_STATES = ["blocked", "failed", "needs_followup", "empty_response"] as const;
-const FAILED_HEARTBEAT_RUN_STATUSES = ["failed", "timed_out", "cancelled"] as const;
 
 type CompanyCountRow = {
   companyId: string;
@@ -345,24 +343,74 @@ export function managementService(db: Db) {
     const staleBefore = new Date(until.getTime() - DEFAULT_STALE_WINDOW_HOURS * 60 * 60 * 1000);
 
     const [
-      currentIssueRows,
-      recentActivityRows,
-      boardCommentRows,
-      heartbeatRunRows,
+      currentIssueMetrics,
+      activityMetrics,
+      boardActionBreakdownRows,
+      boardActionEvidenceRows,
+      boardCommentCount,
+      heartbeatRunMetrics,
+      routineRunMetrics,
+      statusChangeRows,
+      attentionRunRows,
       routineRunRows,
       boardCommentEvidenceRows,
       approvalEvidenceRows,
       blockedIssues,
     ] = await Promise.all([
+      Promise.all([
+        db
+          .select({ count: sql<number>`count(*)` })
+          .from(issues)
+          .where(and(
+            eq(issues.companyId, companyId),
+            isNull(issues.hiddenAt),
+            sql`${issues.status} not in ('done', 'cancelled')`,
+            lt(issues.updatedAt, staleBefore),
+          ))
+          .then((rows) => rows[0]),
+        db
+          .select({ count: sql<number>`count(*)` })
+          .from(issues)
+          .where(and(
+            eq(issues.companyId, companyId),
+            isNull(issues.hiddenAt),
+            gte(issues.createdAt, since),
+          ))
+          .then((rows) => rows[0]),
+      ]).then(([staleOpenIssueCount, issuesCreated]) => ({
+        staleOpenIssueCount: staleOpenIssueCount?.count,
+        issuesCreated: issuesCreated?.count,
+      })),
       db
         .select({
-          id: issues.id,
-          status: issues.status,
-          createdAt: issues.createdAt,
-          updatedAt: issues.updatedAt,
+          issuesCompleted: sql<number>`coalesce(sum(case when ${activityLog.action} = 'issue.updated' and ${activityLog.entityType} = 'issue' and ${activityLog.details}->>'status' = 'done' and (${activityLog.details}->'_previous'->>'status') is distinct from 'done' then 1 else 0 end), 0)`,
+          issuesMovedToBlocked: sql<number>`coalesce(sum(case when ${activityLog.action} = 'issue.updated' and ${activityLog.entityType} = 'issue' and ${activityLog.details}->>'status' = 'blocked' and (${activityLog.details}->'_previous'->>'status') is distinct from 'blocked' then 1 else 0 end), 0)`,
+          issuesCancelled: sql<number>`coalesce(sum(case when ${activityLog.action} = 'issue.updated' and ${activityLog.entityType} = 'issue' and ${activityLog.details}->>'status' = 'cancelled' and (${activityLog.details}->'_previous'->>'status') is distinct from 'cancelled' then 1 else 0 end), 0)`,
+          issuesReopened: sql<number>`coalesce(sum(case when ${activityLog.action} = 'issue.updated' and ${activityLog.entityType} = 'issue' and ${activityLog.details}->>'status' in ('todo', 'in_progress', 'in_review') and (${activityLog.details}->'_previous'->>'status') in ('done', 'cancelled', 'blocked') then 1 else 0 end), 0)`,
+          statusChangeCount: sql<number>`coalesce(sum(case when ${activityLog.action} = 'issue.updated' and ${activityLog.entityType} = 'issue' and (${activityLog.details}->>'status') is distinct from (${activityLog.details}->'_previous'->>'status') then 1 else 0 end), 0)`,
+          assignmentChangeCount: sql<number>`coalesce(sum(case when ${activityLog.action} = 'issue.updated' and ${activityLog.entityType} = 'issue' and ((${activityLog.details}->>'assigneeAgentId') is distinct from (${activityLog.details}->'_previous'->>'assigneeAgentId') or (${activityLog.details}->>'assigneeUserId') is distinct from (${activityLog.details}->'_previous'->>'assigneeUserId')) then 1 else 0 end), 0)`,
+          boardActionCount: sql<number>`coalesce(sum(case when ${activityLog.actorType} = 'user' and ${activityLog.action} <> 'issue.comment_added' then 1 else 0 end), 0)`,
+          approvalCreatedCount: sql<number>`coalesce(sum(case when ${activityLog.action} = 'approval.created' then 1 else 0 end), 0)`,
+          approvalApprovedCount: sql<number>`coalesce(sum(case when ${activityLog.action} = 'approval.approved' then 1 else 0 end), 0)`,
+          approvalRejectedCount: sql<number>`coalesce(sum(case when ${activityLog.action} = 'approval.rejected' then 1 else 0 end), 0)`,
+          approvalRevisionRequestedCount: sql<number>`coalesce(sum(case when ${activityLog.action} = 'approval.revision_requested' then 1 else 0 end), 0)`,
         })
-        .from(issues)
-        .where(and(eq(issues.companyId, companyId), isNull(issues.hiddenAt))),
+        .from(activityLog)
+        .where(and(eq(activityLog.companyId, companyId), gte(activityLog.createdAt, since)))
+        .then((rows) => rows[0]),
+      db
+        .select({
+          action: activityLog.action,
+          count: sql<number>`count(*)`,
+        })
+        .from(activityLog)
+        .where(and(
+          eq(activityLog.companyId, companyId),
+          gte(activityLog.createdAt, since),
+          eq(activityLog.actorType, "user"),
+          sql`${activityLog.action} <> 'issue.comment_added'`,
+        ))
+        .groupBy(activityLog.action),
       db
         .select({
           activityId: activityLog.id,
@@ -375,11 +423,17 @@ export function managementService(db: Db) {
           createdAt: activityLog.createdAt,
         })
         .from(activityLog)
-        .where(and(eq(activityLog.companyId, companyId), gte(activityLog.createdAt, since)))
-        .orderBy(desc(activityLog.createdAt)),
+        .where(and(
+          eq(activityLog.companyId, companyId),
+          gte(activityLog.createdAt, since),
+          eq(activityLog.actorType, "user"),
+          sql`${activityLog.action} <> 'issue.comment_added'`,
+        ))
+        .orderBy(desc(activityLog.createdAt))
+        .limit(input.evidenceLimit),
       db
         .select({
-          commentId: issueComments.id,
+          count: sql<number>`count(*)`,
         })
         .from(issueComments)
         .where(and(
@@ -387,7 +441,46 @@ export function managementService(db: Db) {
           gte(issueComments.createdAt, since),
           isNull(issueComments.deletedAt),
           sql`${issueComments.authorUserId} is not null`,
-        )),
+        ))
+        .then((rows) => rows[0]),
+      db
+        .select({
+          heartbeatRunCount: sql<number>`count(*)`,
+          attentionHeartbeatRunCount: sql<number>`coalesce(sum(case when ${heartbeatRuns.livenessState} in ('blocked', 'failed', 'needs_followup', 'empty_response') or ${heartbeatRuns.status} in ('failed', 'timed_out', 'cancelled') then 1 else 0 end), 0)`,
+          failedHeartbeatRunCount: sql<number>`coalesce(sum(case when ${heartbeatRuns.status} in ('failed', 'timed_out', 'cancelled') then 1 else 0 end), 0)`,
+        })
+        .from(heartbeatRuns)
+        .where(and(eq(heartbeatRuns.companyId, companyId), gte(heartbeatRuns.createdAt, since)))
+        .then((rows) => rows[0]),
+      db
+        .select({
+          routineRunCount: sql<number>`count(*)`,
+          failedRoutineRunCount: sql<number>`coalesce(sum(case when ${routineRuns.status} = 'failed' then 1 else 0 end), 0)`,
+        })
+        .from(routineRuns)
+        .where(and(eq(routineRuns.companyId, companyId), gte(routineRuns.createdAt, since)))
+        .then((rows) => rows[0]),
+      db
+        .select({
+          activityId: activityLog.id,
+          action: activityLog.action,
+          actorType: activityLog.actorType,
+          actorId: activityLog.actorId,
+          entityType: activityLog.entityType,
+          entityId: activityLog.entityId,
+          details: activityLog.details,
+          createdAt: activityLog.createdAt,
+        })
+        .from(activityLog)
+        .where(and(
+          eq(activityLog.companyId, companyId),
+          gte(activityLog.createdAt, since),
+          eq(activityLog.entityType, "issue"),
+          eq(activityLog.action, "issue.updated"),
+          sql`((${activityLog.details}->>'status') is distinct from (${activityLog.details}->'_previous'->>'status') or (${activityLog.details}->>'assigneeAgentId') is distinct from (${activityLog.details}->'_previous'->>'assigneeAgentId') or (${activityLog.details}->>'assigneeUserId') is distinct from (${activityLog.details}->'_previous'->>'assigneeUserId'))`,
+        ))
+        .orderBy(desc(activityLog.createdAt))
+        .limit(input.evidenceLimit),
       db
         .select({
           runId: heartbeatRuns.id,
@@ -401,8 +494,13 @@ export function managementService(db: Db) {
           createdAt: heartbeatRuns.createdAt,
         })
         .from(heartbeatRuns)
-        .where(and(eq(heartbeatRuns.companyId, companyId), gte(heartbeatRuns.createdAt, since)))
-        .orderBy(desc(heartbeatRuns.createdAt)),
+        .where(and(
+          eq(heartbeatRuns.companyId, companyId),
+          gte(heartbeatRuns.createdAt, since),
+          sql`(${heartbeatRuns.livenessState} in ('blocked', 'failed', 'needs_followup', 'empty_response') or ${heartbeatRuns.status} in ('failed', 'timed_out', 'cancelled'))`,
+        ))
+        .orderBy(desc(heartbeatRuns.createdAt))
+        .limit(input.evidenceLimit),
       db
         .select({
           routineRunId: routineRuns.id,
@@ -421,7 +519,8 @@ export function managementService(db: Db) {
         .innerJoin(routines, eq(routines.id, routineRuns.routineId))
         .leftJoin(issues, eq(issues.id, routineRuns.linkedIssueId))
         .where(and(eq(routineRuns.companyId, companyId), gte(routineRuns.createdAt, since)))
-        .orderBy(desc(routineRuns.createdAt)),
+        .orderBy(desc(routineRuns.createdAt))
+        .limit(input.evidenceLimit),
       db
         .select({
           commentId: issueComments.id,
@@ -466,49 +565,16 @@ export function managementService(db: Db) {
       }).then((result) => result.issues),
     ]);
 
-    const boardActionBreakdownMap = new Map<string, number>();
-    const approvalActionCountByAction = new Map<string, number>();
-    for (const row of recentActivityRows) {
-      if (row.actorType === "user" && row.action !== "issue.comment_added") {
-        boardActionBreakdownMap.set(row.action, (boardActionBreakdownMap.get(row.action) ?? 0) + 1);
-      }
-      if (["approval.created", "approval.approved", "approval.rejected", "approval.revision_requested"].includes(row.action)) {
-        approvalActionCountByAction.set(row.action, (approvalActionCountByAction.get(row.action) ?? 0) + 1);
-      }
-    }
-    const boardActionBreakdown: ManagementAnalyzerActionCount[] = Array.from(boardActionBreakdownMap.entries())
-      .map(([action, count]) => ({ action, count }))
+    const boardActionBreakdown: ManagementAnalyzerActionCount[] = boardActionBreakdownRows
+      .map((row) => ({ action: row.action, count: asNumber(row.count) }))
       .sort((left, right) => right.count - left.count || left.action.localeCompare(right.action));
-    const boardActionCount = boardActionBreakdown.reduce((sum, row) => sum + row.count, 0);
-
-    const issueUpdateActivities = recentActivityRows.filter((row) => row.entityType === "issue" && row.action === "issue.updated");
-    const statusChangeRows = issueUpdateActivities.filter((row) => {
-      const details =
-        row.details && typeof row.details === "object" && !Array.isArray(row.details)
-          ? row.details as Record<string, unknown>
-          : {};
-      const previous =
-        details._previous && typeof details._previous === "object" && !Array.isArray(details._previous)
-          ? details._previous as Record<string, unknown>
-          : {};
-      return String(details.status ?? "") !== String(previous.status ?? "") ||
-        String(details.assigneeAgentId ?? "") !== String(previous.assigneeAgentId ?? "") ||
-        String(details.assigneeUserId ?? "") !== String(previous.assigneeUserId ?? "");
-    });
-    const statusChangeEvidenceRows = statusChangeRows.slice(0, input.evidenceLimit);
-    const attentionRunRows = heartbeatRunRows
-      .filter((row) =>
-        ATTENTION_RUN_LIVENESS_STATES.includes((row.livenessState ?? "") as typeof ATTENTION_RUN_LIVENESS_STATES[number]) ||
-        FAILED_HEARTBEAT_RUN_STATUSES.includes(row.status as typeof FAILED_HEARTBEAT_RUN_STATUSES[number]))
-      .slice(0, input.evidenceLimit);
-    const routineRunEvidenceRows = routineRunRows.slice(0, input.evidenceLimit);
+    const includePrivateEvidence = input.access.excerptPolicy === "full";
 
     const issueIdsForActionEvidence = Array.from(new Set([
-      ...recentActivityRows
-        .filter((row) => row.actorType === "user" && row.action !== "issue.comment_added" && row.entityType === "issue")
-        .slice(0, input.evidenceLimit)
+      ...boardActionEvidenceRows
+        .filter((row) => row.entityType === "issue")
         .map((row) => row.entityId),
-      ...statusChangeEvidenceRows.map((row) => row.entityId),
+      ...statusChangeRows.map((row) => row.entityId),
       ...attentionRunRows
         .map((row) => readIssueIdFromRunContext(row.contextSnapshot))
         .filter((value): value is string => Boolean(value)),
@@ -532,33 +598,30 @@ export function managementService(db: Db) {
       issueTitle: row.issueTitle,
       createdAt: row.createdAt,
       authorUserId: row.authorUserId,
-      bodyExcerpt: truncateExcerpt(row.body, input.access.excerptPolicy === "full" ? 280 : 140),
+      bodyExcerpt: truncateExcerpt(row.body, includePrivateEvidence ? 280 : 140),
       issueApiPath: issueApiPath(row.issueId),
       commentApiPath: commentApiPath(row.issueId, row.commentId),
       issueAppPath: issueAppPath(row.issueIdentifier),
     }));
 
-    const boardActions: ManagementAnalyzerBoardActionEvidence[] = recentActivityRows
-      .filter((row) => row.actorType === "user" && row.action !== "issue.comment_added")
-      .slice(0, input.evidenceLimit)
-      .map((row) => {
-        const linkedIssue = row.entityType === "issue" ? evidenceIssueById.get(row.entityId) ?? null : null;
-        return {
-          activityId: row.activityId,
-          action: row.action,
-          createdAt: row.createdAt,
-          entityType: row.entityType,
-          entityId: row.entityId,
-          issueId: linkedIssue?.id ?? null,
-          issueIdentifier: linkedIssue?.identifier ?? null,
-          issueTitle: linkedIssue?.title ?? null,
-          detailsSummary: summarizeActivityDetails(row.details),
-          issueApiPath: linkedIssue ? issueApiPath(linkedIssue.id) : null,
-          issueAppPath: linkedIssue ? issueAppPath(linkedIssue.identifier) : null,
-        };
-      });
+    const boardActions: ManagementAnalyzerBoardActionEvidence[] = boardActionEvidenceRows.map((row) => {
+      const linkedIssue = row.entityType === "issue" ? evidenceIssueById.get(row.entityId) ?? null : null;
+      return {
+        activityId: row.activityId,
+        action: row.action,
+        createdAt: row.createdAt,
+        entityType: row.entityType,
+        entityId: row.entityId,
+        issueId: linkedIssue?.id ?? null,
+        issueIdentifier: linkedIssue?.identifier ?? null,
+        issueTitle: linkedIssue?.title ?? null,
+        detailsSummary: includePrivateEvidence ? summarizeActivityDetails(row.details) : null,
+        issueApiPath: linkedIssue ? issueApiPath(linkedIssue.id) : null,
+        issueAppPath: linkedIssue ? issueAppPath(linkedIssue.identifier) : null,
+      };
+    });
 
-    const statusChanges: ManagementAnalyzerStatusChangeEvidence[] = statusChangeEvidenceRows.map((row) => {
+    const statusChanges: ManagementAnalyzerStatusChangeEvidence[] = statusChangeRows.map((row) => {
       const linkedIssue = evidenceIssueById.get(row.entityId);
       const details =
         row.details && typeof row.details === "object" && !Array.isArray(row.details)
@@ -613,21 +676,21 @@ export function managementService(db: Db) {
         issueId: linkedIssueId,
         issueIdentifier: linkedIssue?.identifier ?? null,
         issueTitle: linkedIssue?.title ?? null,
-        resultSummary: summarizeHeartbeatRunResultJson(row.resultJson),
+        resultSummary: includePrivateEvidence ? summarizeHeartbeatRunResultJson(row.resultJson) : null,
         runIssuesApiPath: runIssuesApiPath(row.runId),
         issueApiPath: linkedIssueId ? issueApiPath(linkedIssueId) : null,
         issueAppPath: issueAppPath(linkedIssue?.identifier ?? null),
       };
     });
 
-    const routineRunsEvidence: ManagementAnalyzerRoutineRunEvidence[] = routineRunEvidenceRows.map((row) => ({
+    const routineRunsEvidence: ManagementAnalyzerRoutineRunEvidence[] = routineRunRows.map((row) => ({
       routineRunId: row.routineRunId,
       routineId: row.routineId,
       routineTitle: row.routineTitle,
       status: row.status,
       source: row.source,
       triggeredAt: row.triggeredAt,
-      failureReason: row.failureReason,
+      failureReason: includePrivateEvidence ? row.failureReason : null,
       linkedIssueId: row.linkedIssueId,
       linkedIssueIdentifier: row.linkedIssueIdentifier,
       linkedIssueTitle: row.linkedIssueTitle,
@@ -639,72 +702,26 @@ export function managementService(db: Db) {
     const metrics: ManagementAnalyzerMetricSummary = {
       openIssueCount: companySummary.openIssueCount,
       blockedIssueCount: companySummary.blockedIssueCount,
-      staleOpenIssueCount: currentIssueRows.filter((row) =>
-        row.status !== "done" && row.status !== "cancelled" && row.updatedAt < staleBefore).length,
-      issuesCreated: currentIssueRows.filter((row) => row.createdAt >= since).length,
-      issuesCompleted: issueUpdateActivities.filter((row) => {
-        const details = row.details as Record<string, unknown> | null;
-        const previous =
-          details?._previous && typeof details._previous === "object" && !Array.isArray(details._previous)
-            ? details._previous as Record<string, unknown>
-            : {};
-        return details?.status === "done" && previous.status !== "done";
-      }).length,
-      issuesMovedToBlocked: issueUpdateActivities.filter((row) => {
-        const details = row.details as Record<string, unknown> | null;
-        const previous =
-          details?._previous && typeof details._previous === "object" && !Array.isArray(details._previous)
-            ? details._previous as Record<string, unknown>
-            : {};
-        return details?.status === "blocked" && previous.status !== "blocked";
-      }).length,
-      issuesCancelled: issueUpdateActivities.filter((row) => {
-        const details = row.details as Record<string, unknown> | null;
-        const previous =
-          details?._previous && typeof details._previous === "object" && !Array.isArray(details._previous)
-            ? details._previous as Record<string, unknown>
-            : {};
-        return details?.status === "cancelled" && previous.status !== "cancelled";
-      }).length,
-      issuesReopened: issueUpdateActivities.filter((row) => {
-        const details = row.details as Record<string, unknown> | null;
-        const previous =
-          details?._previous && typeof details._previous === "object" && !Array.isArray(details._previous)
-            ? details._previous as Record<string, unknown>
-            : {};
-        return ["todo", "in_progress", "in_review"].includes(String(details?.status ?? "")) &&
-          ["done", "cancelled", "blocked"].includes(String(previous.status ?? ""));
-      }).length,
-      statusChangeCount: statusChangeRows.filter((row) => {
-        const details = row.details as Record<string, unknown> | null;
-        const previous =
-          details?._previous && typeof details._previous === "object" && !Array.isArray(details._previous)
-            ? details._previous as Record<string, unknown>
-            : {};
-        return String(details?.status ?? "") !== String(previous.status ?? "");
-      }).length,
-      assignmentChangeCount: statusChangeRows.filter((row) => {
-        const details = row.details as Record<string, unknown> | null;
-        const previous =
-          details?._previous && typeof details._previous === "object" && !Array.isArray(details._previous)
-            ? details._previous as Record<string, unknown>
-            : {};
-        return String(details?.assigneeAgentId ?? "") !== String(previous.assigneeAgentId ?? "") ||
-          String(details?.assigneeUserId ?? "") !== String(previous.assigneeUserId ?? "");
-      }).length,
-      boardCommentCount: boardCommentRows.length,
-      boardActionCount,
-      approvalCreatedCount: approvalActionCountByAction.get("approval.created") ?? 0,
-      approvalApprovedCount: approvalActionCountByAction.get("approval.approved") ?? 0,
-      approvalRejectedCount: approvalActionCountByAction.get("approval.rejected") ?? 0,
-      approvalRevisionRequestedCount: approvalActionCountByAction.get("approval.revision_requested") ?? 0,
+      staleOpenIssueCount: asNumber(currentIssueMetrics?.staleOpenIssueCount),
+      issuesCreated: asNumber(currentIssueMetrics?.issuesCreated),
+      issuesCompleted: asNumber(activityMetrics?.issuesCompleted),
+      issuesMovedToBlocked: asNumber(activityMetrics?.issuesMovedToBlocked),
+      issuesCancelled: asNumber(activityMetrics?.issuesCancelled),
+      issuesReopened: asNumber(activityMetrics?.issuesReopened),
+      statusChangeCount: asNumber(activityMetrics?.statusChangeCount),
+      assignmentChangeCount: asNumber(activityMetrics?.assignmentChangeCount),
+      boardCommentCount: asNumber(boardCommentCount?.count),
+      boardActionCount: asNumber(activityMetrics?.boardActionCount),
+      approvalCreatedCount: asNumber(activityMetrics?.approvalCreatedCount),
+      approvalApprovedCount: asNumber(activityMetrics?.approvalApprovedCount),
+      approvalRejectedCount: asNumber(activityMetrics?.approvalRejectedCount),
+      approvalRevisionRequestedCount: asNumber(activityMetrics?.approvalRevisionRequestedCount),
       activeApprovalCount: companySummary.pendingApprovalCount,
-      heartbeatRunCount: heartbeatRunRows.length,
-      attentionHeartbeatRunCount: attentionRunRows.length,
-      failedHeartbeatRunCount: heartbeatRunRows.filter((row) =>
-        FAILED_HEARTBEAT_RUN_STATUSES.includes(row.status as typeof FAILED_HEARTBEAT_RUN_STATUSES[number])).length,
-      routineRunCount: routineRunRows.length,
-      failedRoutineRunCount: routineRunRows.filter((row) => row.status === "failed").length,
+      heartbeatRunCount: asNumber(heartbeatRunMetrics?.heartbeatRunCount),
+      attentionHeartbeatRunCount: asNumber(heartbeatRunMetrics?.attentionHeartbeatRunCount),
+      failedHeartbeatRunCount: asNumber(heartbeatRunMetrics?.failedHeartbeatRunCount),
+      routineRunCount: asNumber(routineRunMetrics?.routineRunCount),
+      failedRoutineRunCount: asNumber(routineRunMetrics?.failedRoutineRunCount),
     };
 
     return {

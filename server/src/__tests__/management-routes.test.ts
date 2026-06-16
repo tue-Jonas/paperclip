@@ -431,10 +431,12 @@ describeEmbeddedPostgres("management routes", () => {
       expect.objectContaining({
         action: "issue.updated",
         issueId: blockedIssue.id,
+        detailsSummary: null,
       }),
       expect.objectContaining({
         action: "approval.rejected",
         entityId: rejectedApproval.id,
+        detailsSummary: null,
       }),
     ]));
     expect(analyzerRes.body.evidence.statusChanges).toEqual([
@@ -456,6 +458,7 @@ describeEmbeddedPostgres("management routes", () => {
         runId: run.id,
         runIssuesApiPath: `/api/heartbeat-runs/${run.id}/issues`,
         issueId: blockedIssue.id,
+        resultSummary: null,
       }),
     ]);
     expect(analyzerRes.body.evidence.routineRuns).toEqual([
@@ -463,6 +466,7 @@ describeEmbeddedPostgres("management routes", () => {
         routineId: routine.id,
         routineRunsApiPath: `/api/routines/${routine.id}/runs`,
         linkedIssueId: blockedIssue.id,
+        failureReason: null,
       }),
     ]);
 
@@ -501,6 +505,125 @@ describeEmbeddedPostgres("management routes", () => {
         payload: { title: "Mutating write" },
       });
     expect(writeRes.status).toBe(403);
+  }, 15_000);
+
+  it("lets same-company agents read full analyzer evidence without cross-company audit", async () => {
+    const company = await seedCompany(db, undefined, "SameCompany");
+    const agent = await seedAgent(db, company.id, "SameCompanyAgent");
+    const project = await seedProject(db, company.id, "Ops");
+    const issue = await seedIssue(db, {
+      companyId: company.id,
+      projectId: project.id,
+      assigneeAgentId: agent.id,
+      title: "Investigate repeated failures",
+      status: "blocked",
+      identifier: `${company.issuePrefix}-1`,
+    });
+    const run = await db
+      .insert(heartbeatRuns)
+      .values({
+        companyId: company.id,
+        agentId: agent.id,
+        status: "failed",
+        invocationSource: "assignment",
+        livenessState: "failed",
+        startedAt: new Date("2026-06-16T18:00:00.000Z"),
+        finishedAt: new Date("2026-06-16T18:03:00.000Z"),
+        resultJson: { summary: "Failure was caused by missing credentials" },
+        contextSnapshot: { issueId: issue.id },
+      })
+      .returning()
+      .then((rows) => rows[0]!);
+
+    await db.insert(issueComments).values({
+      companyId: company.id,
+      issueId: issue.id,
+      authorType: "user",
+      authorUserId: "board-user",
+      body: "Same-company board note with enough detail to remain fully visible to the analyzer caller.",
+      createdAt: new Date("2026-06-16T18:05:00.000Z"),
+      updatedAt: new Date("2026-06-16T18:05:00.000Z"),
+    });
+    await db.insert(activityLog).values({
+      companyId: company.id,
+      actorType: "user",
+      actorId: "board-user",
+      action: "issue.updated",
+      entityType: "issue",
+      entityId: issue.id,
+      details: {
+        status: "blocked",
+        source: "board_triage",
+        _previous: { status: "todo" },
+      },
+      createdAt: new Date("2026-06-16T18:06:00.000Z"),
+    });
+    const routine = await db
+      .insert(routines)
+      .values({
+        companyId: company.id,
+        projectId: project.id,
+        parentIssueId: issue.id,
+        title: "Same-company analyzer",
+        assigneeAgentId: agent.id,
+      })
+      .returning()
+      .then((rows) => rows[0]!);
+    await db.insert(routineRuns).values({
+      companyId: company.id,
+      routineId: routine.id,
+      source: "schedule",
+      status: "failed",
+      triggeredAt: new Date("2026-06-16T18:07:00.000Z"),
+      failureReason: "scheduler timeout with internal detail",
+      linkedIssueId: issue.id,
+      createdAt: new Date("2026-06-16T18:07:00.000Z"),
+      updatedAt: new Date("2026-06-16T18:07:00.000Z"),
+    });
+
+    const app = await createApp(db, {
+      type: "agent",
+      agentId: agent.id,
+      companyId: company.id,
+      runId: run.id,
+    });
+
+    const analyzerRes = await request(app)
+      .get(`/api/management/companies/${company.id}/analyzer-snapshot`)
+      .query({ windowHours: 24, evidenceLimit: 5 });
+    expect(analyzerRes.status, JSON.stringify(analyzerRes.body)).toBe(200);
+    expect(analyzerRes.body.access).toMatchObject({
+      mode: "same_company",
+      excerptPolicy: "full",
+      grantId: null,
+    });
+    expect(analyzerRes.body.evidence.boardComments[0].bodyExcerpt).toContain(
+      "Same-company board note with enough detail",
+    );
+    expect(analyzerRes.body.evidence.boardActions).toEqual([
+      expect.objectContaining({
+        action: "issue.updated",
+        detailsSummary: expect.objectContaining({ status: "blocked" }),
+      }),
+    ]);
+    expect(analyzerRes.body.evidence.attentionRuns).toEqual([
+      expect.objectContaining({
+        runId: run.id,
+        resultSummary: expect.objectContaining({ summary: expect.any(String) }),
+      }),
+    ]);
+    expect(analyzerRes.body.evidence.routineRuns).toEqual([
+      expect.objectContaining({
+        routineId: routine.id,
+        failureReason: "scheduler timeout with internal detail",
+      }),
+    ]);
+
+    const auditRows = await db
+      .select({ id: activityLog.id })
+      .from(activityLog)
+      .where(eq(activityLog.action, "cross_company_analyzer_snapshot.read"));
+    expect(auditRows).toHaveLength(0);
   }, 15_000);
 
   it("denies cross-company management reads without an active grant", async () => {
