@@ -75,13 +75,29 @@ describe("assertCompanyAccess", () => {
     expect(() => assertCompanyAccess(req, "company-1")).not.toThrow();
   });
 
-  it("rejects signed-in instance admins without explicit company access", () => {
+  it("allows signed-in instance admins to access any company outside cloud tenant mode", () => {
     const req = makeReq({
       method: "GET",
       actor: {
         type: "board",
         userId: "admin-1",
         source: "session",
+        isInstanceAdmin: true,
+        companyIds: [],
+        memberships: [],
+      },
+    });
+
+    expect(() => assertCompanyAccess(req, "company-1")).not.toThrow();
+  });
+
+  it("keeps cloud tenant board actors company-scoped even when isInstanceAdmin is true", () => {
+    const req = makeReq({
+      method: "GET",
+      actor: {
+        type: "board",
+        userId: "cloud-admin-1",
+        source: "cloud_tenant",
         isInstanceAdmin: true,
         companyIds: [],
         memberships: [],

@@ -82,6 +82,22 @@ describe("secret routes", () => {
     });
   });
 
+  it("allows board API key instance admins to reach company-scoped secret routes without memberships", async () => {
+    mockSecretService.listProviderConfigs.mockResolvedValue([]);
+
+    const res = await request(createApp({
+      type: "board",
+      userId: "admin-1",
+      source: "board_key",
+      isInstanceAdmin: true,
+      companyIds: [],
+      memberships: [],
+    })).get("/api/companies/company-1/secret-provider-configs");
+
+    expect(res.status).toBe(200);
+    expect(mockSecretService.listProviderConfigs).toHaveBeenCalledWith("company-1");
+  });
+
   it("rejects managed secret creation when externalRef is supplied", async () => {
     const res = await request(createApp()).post("/api/companies/company-1/secrets").send({
       name: "OpenAI API Key",
