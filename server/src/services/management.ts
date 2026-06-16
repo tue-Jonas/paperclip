@@ -115,6 +115,28 @@ function truncateExcerpt(text: string | null | undefined, max: number) {
   return normalized.length <= max ? normalized : `${normalized.slice(0, max - 1)}...`;
 }
 
+function redactAnalyzerBlockedIssue(issue: ManagementIssueSummary): ManagementIssueSummary {
+  return {
+    ...issue,
+    projectName: null,
+    title: issue.identifier ?? "Blocked issue",
+    assigneeAgentId: null,
+    assigneeUserId: null,
+    executionRunId: null,
+    blockedBy: issue.blockedBy.map((blocker) => ({
+      ...blocker,
+      title: blocker.identifier ?? "Blocking issue",
+    })),
+    activeRecoveryAction: issue.activeRecoveryAction
+      ? {
+          ...issue.activeRecoveryAction,
+          nextAction: "redacted",
+          ownerAgentId: null,
+        }
+      : null,
+  };
+}
+
 function issueAppPath(identifier: string | null) {
   if (!identifier) return null;
   const prefix = identifier.split("-")[0]?.trim();
@@ -659,7 +681,7 @@ export function managementService(db: Db) {
       decidedByUserId: row.decidedByUserId,
       createdAt: row.createdAt,
       decidedAt: row.decidedAt,
-      payloadSummary: summarizeApprovalPayloadForAnalyzer(row.payload),
+      payloadSummary: includePrivateEvidence ? summarizeApprovalPayloadForAnalyzer(row.payload) : null,
       approvalApiPath: approvalApiPath(row.approvalId),
     }));
 
@@ -742,7 +764,7 @@ export function managementService(db: Db) {
         approvals: approvalEvidence,
         attentionRuns,
         routineRuns: routineRunsEvidence,
-        blockedIssues,
+        blockedIssues: includePrivateEvidence ? blockedIssues : blockedIssues.map(redactAnalyzerBlockedIssue),
       },
     };
   }

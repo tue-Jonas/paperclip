@@ -451,6 +451,7 @@ describeEmbeddedPostgres("management routes", () => {
       expect.objectContaining({
         approvalId: rejectedApproval.id,
         approvalApiPath: `/api/approvals/${rejectedApproval.id}`,
+        payloadSummary: null,
       }),
     ]));
     expect(analyzerRes.body.evidence.attentionRuns).toEqual([
@@ -467,6 +468,20 @@ describeEmbeddedPostgres("management routes", () => {
         routineRunsApiPath: `/api/routines/${routine.id}/runs`,
         linkedIssueId: blockedIssue.id,
         failureReason: null,
+      }),
+    ]);
+    expect(analyzerRes.body.evidence.blockedIssues).toEqual([
+      expect.objectContaining({
+        id: blockedIssue.id,
+        title: blockedIssue.identifier,
+        projectName: null,
+        assigneeAgentId: null,
+        assigneeUserId: null,
+        executionRunId: null,
+        activeRecoveryAction: expect.objectContaining({
+          nextAction: "redacted",
+          ownerAgentId: null,
+        }),
       }),
     ]);
 
@@ -618,6 +633,12 @@ describeEmbeddedPostgres("management routes", () => {
         failureReason: "scheduler timeout with internal detail",
       }),
     ]);
+    expect(analyzerRes.body.evidence.blockedIssues).toEqual([
+      expect.objectContaining({
+        id: issue.id,
+        title: "Investigate repeated failures",
+      }),
+    ]);
 
     const auditRows = await db
       .select({ id: activityLog.id })
@@ -639,6 +660,12 @@ describeEmbeddedPostgres("management routes", () => {
     const res = await request(app).get(`/api/management/companies/${targetCompany.id}`);
     expect(res.status).toBe(403);
     expect(res.body.error).toContain("management read boundary");
+
+    const analyzerRes = await request(app).get(
+      `/api/management/companies/${targetCompany.id}/analyzer-snapshot`,
+    );
+    expect(analyzerRes.status).toBe(403);
+    expect(analyzerRes.body.error).toContain("management read boundary");
   }, 15_000);
 
   it("lets instance-admin board actors read management company summaries without grants", async () => {
