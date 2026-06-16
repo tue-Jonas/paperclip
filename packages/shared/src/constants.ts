@@ -734,6 +734,14 @@ export const PERMISSION_KEYS = [
 ] as const;
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
 
+export const CROSS_COMPANY_AGENT_GRANT_CAPABILITIES = ["read"] as const;
+export type CrossCompanyAgentGrantCapability =
+  (typeof CROSS_COMPANY_AGENT_GRANT_CAPABILITIES)[number];
+
+export const CROSS_COMPANY_AGENT_GRANT_STATUSES = ["active", "revoked"] as const;
+export type CrossCompanyAgentGrantStatus =
+  (typeof CROSS_COMPANY_AGENT_GRANT_STATUSES)[number];
+
 // ---------------------------------------------------------------------------
 // Plugin System — see doc/plugins/PLUGIN_SPEC.md for the full specification
 // ---------------------------------------------------------------------------

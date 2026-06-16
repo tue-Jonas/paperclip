@@ -1,5 +1,20 @@
 export type { Company } from "./company.js";
 export type {
+  ManagementAgentSummary,
+  ManagementApprovalSummary,
+  ManagementCompanyDetailResponse,
+  ManagementCompanyHealthSummary,
+  ManagementCompanyListResponse,
+  ManagementCompanySummary,
+  ManagementIssueBlockerSummary,
+  ManagementIssueListResponse,
+  ManagementIssueRecoverySummary,
+  ManagementIssueSummary,
+  ManagementProjectSummary,
+  ManagementRunListResponse,
+  ManagementRunSummary,
+} from "./management.js";
+export type {
   Environment,
   EnvironmentLease,
   EnvironmentProbeResult,
@@ -486,6 +501,8 @@ export type {
   AdminUserDirectoryEntry,
   UserCompanyAccessEntry,
   UserCompanyAccessResponse,
+  CrossCompanyAgentGrantRecord,
+  CrossCompanyAgentGrantListResponse,
 } from "./access.js";
 export type { QuotaWindow, ProviderQuotaResult } from "./quota.js";
 export type {

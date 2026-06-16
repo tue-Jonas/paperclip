@@ -42,11 +42,17 @@ export {
 } from "./productivity-review.js";
 export { classifyIssueGraphLiveness, type IssueLivenessFinding } from "./recovery/index.js";
 export { dashboardService } from "./dashboard.js";
+export { managementService } from "./management.js";
 export { sidebarBadgeService } from "./sidebar-badges.js";
 export { sidebarPreferenceService } from "./sidebar-preferences.js";
 export { resourceMembershipService, type ResourceMembershipPolicyHook } from "./resource-memberships.js";
 export { inboxDismissalService } from "./inbox-dismissals.js";
 export { accessService } from "./access.js";
+export {
+  crossCompanyAgentGrantService,
+  isAllowedCrossCompanyAgentSourceCompany,
+  TWX_CROSS_COMPANY_SOURCE_COMPANY_ID,
+} from "./cross-company-agent-grants.js";
 export {
   backfillPrincipalAccessCompatibility,
   ensureHumanRoleDefaultGrants,

@@ -5,6 +5,7 @@ import {
   companies,
   companyMemberships,
   createDb,
+  crossCompanyAgentGrants,
   instanceUserRoles,
   issues,
   principalPermissionGrants,
@@ -16,6 +17,7 @@ import {
   startEmbeddedPostgresTestDatabase,
 } from "./helpers/embedded-postgres.js";
 import { authorizationService } from "../services/authorization.js";
+import { TWX_CROSS_COMPANY_SOURCE_COMPANY_ID } from "../services/cross-company-agent-grants.js";
 
 const embeddedPostgresSupport = await getEmbeddedPostgresTestSupport();
 const describeEmbeddedPostgres = embeddedPostgresSupport.supported ? describe : describe.skip;
@@ -24,6 +26,18 @@ async function createCompany(db: ReturnType<typeof createDb>, label: string) {
   return db
     .insert(companies)
     .values({
+      name: `Authorization ${label} ${randomUUID()}`,
+      issuePrefix: `AZ${randomUUID().slice(0, 6).toUpperCase()}`,
+    })
+    .returning()
+    .then((rows) => rows[0]!);
+}
+
+async function createNamedCompany(db: ReturnType<typeof createDb>, id: string, label: string) {
+  return db
+    .insert(companies)
+    .values({
+      id,
       name: `Authorization ${label} ${randomUUID()}`,
       issuePrefix: `AZ${randomUUID().slice(0, 6).toUpperCase()}`,
     })
@@ -124,6 +138,7 @@ describeEmbeddedPostgres("authorization service", () => {
   }, 20_000);
 
   afterEach(async () => {
+    await db.delete(crossCompanyAgentGrants);
     await db.delete(principalPermissionGrants);
     await db.delete(companyMemberships);
     await db.delete(instanceUserRoles);
@@ -220,6 +235,125 @@ describeEmbeddedPostgres("authorization service", () => {
       reason: "deny_company_boundary",
     });
     expect(decision.explanation).toContain("Agent key cannot access another company");
+  });
+
+  it("allows TWX agents with an active cross-company read grant to read another company", async () => {
+    const sourceCompany = await createNamedCompany(db, TWX_CROSS_COMPANY_SOURCE_COMPANY_ID, "TWX");
+    const targetCompany = await createCompany(db, "TargetRead");
+    const actorAgent = await createAgent(db, sourceCompany.id);
+    const targetIssue = await createIssue(db, targetCompany.id);
+
+    await db.insert(crossCompanyAgentGrants).values({
+      sourceCompanyId: sourceCompany.id,
+      principalType: "agent",
+      principalId: actorAgent.id,
+      targetCompanyId: targetCompany.id,
+      capability: "read",
+      status: "active",
+      createdByUserId: "owner",
+    });
+
+    const decision = await authorizationService(db).decide({
+      actor: { type: "agent", agentId: actorAgent.id, companyId: sourceCompany.id, source: "agent_jwt" },
+      action: "issue:read",
+      resource: { type: "issue", companyId: targetCompany.id, issueId: targetIssue.id },
+    });
+
+    expect(decision).toMatchObject({
+      allowed: true,
+      reason: "allow_cross_company_grant",
+      crossCompanyGrant: {
+        sourceCompanyId: sourceCompany.id,
+        principalId: actorAgent.id,
+        targetCompanyId: targetCompany.id,
+        capability: "read",
+      },
+    });
+  });
+
+  it("denies TWX cross-company reads without an active grant", async () => {
+    const sourceCompany = await createNamedCompany(db, TWX_CROSS_COMPANY_SOURCE_COMPANY_ID, "TWXNoGrant");
+    const targetCompany = await createCompany(db, "TargetNoGrant");
+    const actorAgent = await createAgent(db, sourceCompany.id);
+    const targetIssue = await createIssue(db, targetCompany.id);
+
+    const decision = await authorizationService(db).decide({
+      actor: { type: "agent", agentId: actorAgent.id, companyId: sourceCompany.id, source: "agent_jwt" },
+      action: "issue:read",
+      resource: { type: "issue", companyId: targetCompany.id, issueId: targetIssue.id },
+    });
+
+    expect(decision).toMatchObject({
+      allowed: false,
+      reason: "deny_missing_grant",
+    });
+    expect(decision.explanation).toContain("cross-company read grant");
+  });
+
+  it("keeps non-TWX agents denied even if a cross-company grant row exists", async () => {
+    const sourceCompany = await createCompany(db, "OtherSource");
+    const targetCompany = await createCompany(db, "OtherTarget");
+    const actorAgent = await createAgent(db, sourceCompany.id);
+    const targetProject = await createProject(db, targetCompany.id, "Target");
+
+    await db.insert(crossCompanyAgentGrants).values({
+      sourceCompanyId: sourceCompany.id,
+      principalType: "agent",
+      principalId: actorAgent.id,
+      targetCompanyId: targetCompany.id,
+      capability: "read",
+      status: "active",
+      createdByUserId: "owner",
+    });
+
+    const decision = await authorizationService(db).decide({
+      actor: { type: "agent", agentId: actorAgent.id, companyId: sourceCompany.id, source: "agent_key" },
+      action: "project:read",
+      resource: { type: "project", companyId: targetCompany.id, projectId: targetProject.id },
+    });
+
+    expect(decision).toMatchObject({
+      allowed: false,
+      reason: "deny_company_boundary",
+    });
+    expect(decision.explanation).toContain("Only TWX agents");
+  });
+
+  it("keeps writes and secrets outside the cross-company read grant", async () => {
+    const sourceCompany = await createNamedCompany(db, TWX_CROSS_COMPANY_SOURCE_COMPANY_ID, "TWXWrite");
+    const targetCompany = await createCompany(db, "TargetWrite");
+    const actorAgent = await createAgent(db, sourceCompany.id);
+    const targetIssue = await createIssue(db, targetCompany.id);
+
+    await db.insert(crossCompanyAgentGrants).values({
+      sourceCompanyId: sourceCompany.id,
+      principalType: "agent",
+      principalId: actorAgent.id,
+      targetCompanyId: targetCompany.id,
+      capability: "read",
+      status: "active",
+      createdByUserId: "owner",
+    });
+
+    const mutateDecision = await authorizationService(db).decide({
+      actor: { type: "agent", agentId: actorAgent.id, companyId: sourceCompany.id, source: "agent_jwt" },
+      action: "issue:mutate",
+      resource: { type: "issue", companyId: targetCompany.id, issueId: targetIssue.id },
+    });
+    expect(mutateDecision).toMatchObject({
+      allowed: false,
+      reason: "deny_company_boundary",
+    });
+
+    const secretsDecision = await authorizationService(db).decide({
+      actor: { type: "agent", agentId: actorAgent.id, companyId: sourceCompany.id, source: "agent_jwt" },
+      action: "secrets:read",
+      resource: { type: "company", companyId: targetCompany.id },
+    });
+    expect(secretsDecision).toMatchObject({
+      allowed: false,
+      reason: "deny_company_boundary",
+    });
   });
 
   it("allows simple-mode task assignment between same-company agents without explicit grants", async () => {

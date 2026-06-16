@@ -1,6 +1,8 @@
 import type {
   AgentAdapterType,
   CompanyStatus,
+  CrossCompanyAgentGrantCapability,
+  CrossCompanyAgentGrantStatus,
   HumanCompanyMembershipRole,
   InstanceUserRole,
   InviteJoinType,
@@ -167,4 +169,27 @@ export interface UserCompanyAccessResponse {
     isInstanceAdmin: boolean;
   }) | null;
   companyAccess: UserCompanyAccessEntry[];
+}
+
+export interface CrossCompanyAgentGrantRecord {
+  id: string;
+  sourceCompanyId: string;
+  sourceCompanyName: string | null;
+  principalType: "agent";
+  principalId: string;
+  principalAgentName: string | null;
+  targetCompanyId: string;
+  targetCompanyName: string | null;
+  capability: CrossCompanyAgentGrantCapability;
+  status: CrossCompanyAgentGrantStatus;
+  createdByUserId: string | null;
+  revokedByUserId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  revokedAt: Date | null;
+}
+
+export interface CrossCompanyAgentGrantListResponse {
+  grants: CrossCompanyAgentGrantRecord[];
+  nextOffset: number | null;
 }
