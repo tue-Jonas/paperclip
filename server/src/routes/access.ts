@@ -2427,7 +2427,6 @@ export function accessRoutes(
 ) {
   const router = Router();
   const access = accessService(db);
-  const crossCompanyGrants = crossCompanyAgentGrantService(db);
   const boardAuth = boardAuthService(db);
   const agents = agentService(db);
   const routeInviteResolutionNetwork = opts.inviteResolutionNetwork
@@ -4527,7 +4526,7 @@ export function accessRoutes(
   router.get("/admin/cross-company-agent-grants", async (req, res) => {
     await assertInstanceAdmin(req);
     const query = listCrossCompanyAgentGrantsQuerySchema.parse(req.query);
-    res.json(await crossCompanyGrants.list(query));
+    res.json(await crossCompanyAgentGrantService(db).list(query));
   });
 
   router.post(
@@ -4535,7 +4534,7 @@ export function accessRoutes(
     validate(createCrossCompanyAgentGrantSchema),
     async (req, res) => {
       await assertInstanceAdmin(req);
-      const grant = await crossCompanyGrants.upsert({
+      const grant = await crossCompanyAgentGrantService(db).upsert({
         ...req.body,
         createdByUserId: req.actor.userId ?? null,
       });
@@ -4575,7 +4574,10 @@ export function accessRoutes(
     validate(revokeCrossCompanyAgentGrantSchema),
     async (req, res) => {
       await assertInstanceAdmin(req);
-      const grant = await crossCompanyGrants.revoke(req.body.grantId, req.actor.userId ?? null);
+      const grant = await crossCompanyAgentGrantService(db).revoke(
+        req.body.grantId,
+        req.actor.userId ?? null,
+      );
       if (!grant) throw notFound("Cross-company agent grant not found");
 
       const details = {

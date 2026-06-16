@@ -26,19 +26,12 @@ const mockBoardAuthService = vi.hoisted(() => ({
   getBoardApiKeyForUser: vi.fn(),
 }));
 
-const mockCrossCompanyAgentGrantService = vi.hoisted(() => ({
-  list: vi.fn(),
-  upsert: vi.fn(),
-  revoke: vi.fn(),
-}));
-
 const mockLogActivity = vi.hoisted(() => vi.fn());
 
 vi.mock("../services/index.js", () => ({
   accessService: () => mockAccessService,
   agentService: () => mockAgentService,
   boardAuthService: () => mockBoardAuthService,
-  crossCompanyAgentGrantService: () => mockCrossCompanyAgentGrantService,
   logActivity: mockLogActivity,
   notifyHireApproved: vi.fn(),
   deduplicateAgentName: vi.fn((name: string) => name),
@@ -51,7 +44,6 @@ function registerModuleMocks() {
     accessService: () => mockAccessService,
     agentService: () => mockAgentService,
     boardAuthService: () => mockBoardAuthService,
-    crossCompanyAgentGrantService: () => mockCrossCompanyAgentGrantService,
     logActivity: mockLogActivity,
     notifyHireApproved: vi.fn(),
     deduplicateAgentName: vi.fn((name: string) => name),
