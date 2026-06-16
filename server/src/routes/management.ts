@@ -26,11 +26,15 @@ export function managementRoutes(db: Db) {
     });
   }
 
+  function isCrossCompanyGrantRead(decision: Awaited<ReturnType<typeof companyReadAllowed>>) {
+    return decision.allowed && Boolean(decision.crossCompanyGrant);
+  }
+
   async function assertCompanyReadAllowed(req: Request, res: Response, companyId: string) {
     const decision = await companyReadAllowed(req, companyId);
-    if (decision.allowed) return true;
+    if (decision.allowed) return decision;
     res.status(403).json({ error: "Company is outside this actor's management read boundary" });
-    return false;
+    return null;
   }
 
   async function listAccessibleCompanyIds(req: Request) {
@@ -85,9 +89,12 @@ export function managementRoutes(db: Db) {
   router.get("/management/companies/:companyId", async (req, res) => {
     assertBoardOrAgent(req);
     const companyId = req.params.companyId as string;
-    if (!(await assertCompanyReadAllowed(req, res, companyId))) return;
+    const decision = await assertCompanyReadAllowed(req, res, companyId);
+    if (!decision) return;
 
-    const detail = await management.getCompanyDetail(companyId);
+    const detail = await management.getCompanyDetail(companyId, {
+      includeApprovals: !isCrossCompanyGrantRead(decision),
+    });
     if (!detail) {
       res.status(404).json({ error: "Company not found" });
       return;
@@ -114,7 +121,12 @@ export function managementRoutes(db: Db) {
   router.get("/management/companies/:companyId/runs", async (req, res) => {
     assertBoardOrAgent(req);
     const companyId = req.params.companyId as string;
-    if (!(await assertCompanyReadAllowed(req, res, companyId))) return;
+    const decision = await assertCompanyReadAllowed(req, res, companyId);
+    if (!decision) return;
+    if (isCrossCompanyGrantRead(decision)) {
+      res.status(403).json({ error: "Heartbeat runs are outside this actor's management read boundary" });
+      return;
+    }
 
     const query = managementRunListQuerySchema.parse(req.query);
     res.json(await management.listCompanyRuns(companyId, query));

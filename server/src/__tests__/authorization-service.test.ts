@@ -17,10 +17,11 @@ import {
   startEmbeddedPostgresTestDatabase,
 } from "./helpers/embedded-postgres.js";
 import { authorizationService } from "../services/authorization.js";
-import { TWX_CROSS_COMPANY_SOURCE_COMPANY_ID } from "../services/cross-company-agent-grants.js";
+import { CROSS_COMPANY_AGENT_SOURCE_COMPANY_IDS_ENV_VAR } from "../services/cross-company-agent-grants.js";
 
 const embeddedPostgresSupport = await getEmbeddedPostgresTestSupport();
 const describeEmbeddedPostgres = embeddedPostgresSupport.supported ? describe : describe.skip;
+const TEST_SOURCE_COMPANY_ID = "11111111-1111-4111-8111-111111111111";
 
 async function createCompany(db: ReturnType<typeof createDb>, label: string) {
   return db
@@ -131,10 +132,13 @@ async function grantAgentPermission(
 describeEmbeddedPostgres("authorization service", () => {
   let db!: ReturnType<typeof createDb>;
   let tempDb: Awaited<ReturnType<typeof startEmbeddedPostgresTestDatabase>> | null = null;
+  const previousAllowedSourceCompanyIds =
+    process.env[CROSS_COMPANY_AGENT_SOURCE_COMPANY_IDS_ENV_VAR];
 
   beforeAll(async () => {
     tempDb = await startEmbeddedPostgresTestDatabase("paperclip-authorization-service-");
     db = createDb(tempDb.connectionString);
+    process.env[CROSS_COMPANY_AGENT_SOURCE_COMPANY_IDS_ENV_VAR] = TEST_SOURCE_COMPANY_ID;
   }, 20_000);
 
   afterEach(async () => {
@@ -149,6 +153,12 @@ describeEmbeddedPostgres("authorization service", () => {
   });
 
   afterAll(async () => {
+    if (previousAllowedSourceCompanyIds === undefined) {
+      delete process.env[CROSS_COMPANY_AGENT_SOURCE_COMPANY_IDS_ENV_VAR];
+    } else {
+      process.env[CROSS_COMPANY_AGENT_SOURCE_COMPANY_IDS_ENV_VAR] =
+        previousAllowedSourceCompanyIds;
+    }
     await tempDb?.cleanup();
   });
 
@@ -237,8 +247,8 @@ describeEmbeddedPostgres("authorization service", () => {
     expect(decision.explanation).toContain("Agent key cannot access another company");
   });
 
-  it("allows TWX agents with an active cross-company read grant to read another company", async () => {
-    const sourceCompany = await createNamedCompany(db, TWX_CROSS_COMPANY_SOURCE_COMPANY_ID, "TWX");
+  it("allows configured source-company agents with an active cross-company read grant to read another company", async () => {
+    const sourceCompany = await createNamedCompany(db, TEST_SOURCE_COMPANY_ID, "Source");
     const targetCompany = await createCompany(db, "TargetRead");
     const actorAgent = await createAgent(db, sourceCompany.id);
     const targetIssue = await createIssue(db, targetCompany.id);
@@ -271,8 +281,8 @@ describeEmbeddedPostgres("authorization service", () => {
     });
   });
 
-  it("denies TWX cross-company reads without an active grant", async () => {
-    const sourceCompany = await createNamedCompany(db, TWX_CROSS_COMPANY_SOURCE_COMPANY_ID, "TWXNoGrant");
+  it("denies configured source-company cross-company reads without an active grant", async () => {
+    const sourceCompany = await createNamedCompany(db, TEST_SOURCE_COMPANY_ID, "SourceNoGrant");
     const targetCompany = await createCompany(db, "TargetNoGrant");
     const actorAgent = await createAgent(db, sourceCompany.id);
     const targetIssue = await createIssue(db, targetCompany.id);
@@ -290,7 +300,7 @@ describeEmbeddedPostgres("authorization service", () => {
     expect(decision.explanation).toContain("cross-company read grant");
   });
 
-  it("keeps non-TWX agents denied even if a cross-company grant row exists", async () => {
+  it("keeps non-allowlisted agents denied even if a cross-company grant row exists", async () => {
     const sourceCompany = await createCompany(db, "OtherSource");
     const targetCompany = await createCompany(db, "OtherTarget");
     const actorAgent = await createAgent(db, sourceCompany.id);
@@ -316,11 +326,11 @@ describeEmbeddedPostgres("authorization service", () => {
       allowed: false,
       reason: "deny_company_boundary",
     });
-    expect(decision.explanation).toContain("Only TWX agents");
+    expect(decision.explanation).toContain("configured source-company agents");
   });
 
   it("keeps writes and secrets outside the cross-company read grant", async () => {
-    const sourceCompany = await createNamedCompany(db, TWX_CROSS_COMPANY_SOURCE_COMPANY_ID, "TWXWrite");
+    const sourceCompany = await createNamedCompany(db, TEST_SOURCE_COMPANY_ID, "SourceWrite");
     const targetCompany = await createCompany(db, "TargetWrite");
     const actorAgent = await createAgent(db, sourceCompany.id);
     const targetIssue = await createIssue(db, targetCompany.id);

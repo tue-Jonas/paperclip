@@ -96,6 +96,11 @@ exists. Rebuild it with `pnpm --filter @paperclipai/ui build` before restarting
 the service when UI source has changed. `pnpm dev` continues to use Vite
 middleware for active development.
 
+Cross-company agent reads stay disabled by default. To allow specific source
+companies to hold cross-company read grants, set
+`PAPERCLIP_CROSS_COMPANY_AGENT_SOURCE_COMPANY_IDS` to a comma-separated list of
+company UUIDs before creating or using those grants.
+
 Legacy aliases still map to the old broad private-network behavior:
 
 ```sh

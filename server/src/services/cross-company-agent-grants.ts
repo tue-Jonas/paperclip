@@ -12,10 +12,18 @@ import type {
 } from "@paperclipai/shared";
 import { badRequest, notFound } from "../errors.js";
 
-export const TWX_CROSS_COMPANY_SOURCE_COMPANY_ID = "2db649fb-c269-41bc-a8da-0747c21ba2eb";
+export const CROSS_COMPANY_AGENT_SOURCE_COMPANY_IDS_ENV_VAR =
+  "PAPERCLIP_CROSS_COMPANY_AGENT_SOURCE_COMPANY_IDS";
+
+export function listAllowedCrossCompanyAgentSourceCompanyIds() {
+  return (process.env[CROSS_COMPANY_AGENT_SOURCE_COMPANY_IDS_ENV_VAR] ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+}
 
 export function isAllowedCrossCompanyAgentSourceCompany(companyId: string) {
-  return companyId === TWX_CROSS_COMPANY_SOURCE_COMPANY_ID;
+  return listAllowedCrossCompanyAgentSourceCompanyIds().includes(companyId);
 }
 
 type CrossCompanyAgentGrantRow = typeof crossCompanyAgentGrants.$inferSelect;
@@ -53,7 +61,7 @@ export function crossCompanyAgentGrantService(db: Db) {
 
   async function assertGrantTargets(input: CreateCrossCompanyAgentGrant) {
     if (!isAllowedCrossCompanyAgentSourceCompany(input.sourceCompanyId)) {
-      throw badRequest("Only the TWX company can hold cross-company agent grants");
+      throw badRequest("Only configured source companies can hold cross-company agent grants");
     }
 
     const [sourceCompany, targetCompany, principalAgent] = await Promise.all([

@@ -161,7 +161,7 @@ export function managementService(db: Db) {
           companyId: projects.companyId,
           projectCount: sql<number>`count(*)`,
           activeProjectCount:
-            sql<number>`coalesce(sum(case when ${projects.status} not in ('done', 'cancelled') then 1 else 0 end), 0)`,
+            sql<number>`coalesce(sum(case when ${projects.status} not in ('completed', 'cancelled') then 1 else 0 end), 0)`,
         })
         .from(projects)
         .where(inArray(projects.companyId, companyIds))
@@ -237,9 +237,13 @@ export function managementService(db: Db) {
     });
   }
 
-  async function getCompanyDetail(companyId: string): Promise<ManagementCompanyDetailResponse | null> {
+  async function getCompanyDetail(
+    companyId: string,
+    options: { includeApprovals?: boolean } = {},
+  ): Promise<ManagementCompanyDetailResponse | null> {
     const [companySummary] = await listCompanySummaries([companyId]);
     if (!companySummary) return null;
+    const includeApprovals = options.includeApprovals ?? true;
 
     const projectIssueCounts = await db
       .select({
@@ -258,7 +262,7 @@ export function managementService(db: Db) {
         .map((row) => [row.projectId as string, row]),
     );
 
-    const [agentRows, projectRows, approvalRows] = await Promise.all([
+    const [agentRows, projectRows] = await Promise.all([
       db
         .select({
           id: agents.id,
@@ -291,7 +295,10 @@ export function managementService(db: Db) {
         .where(eq(projects.companyId, companyId))
         .orderBy(desc(projects.updatedAt))
         .limit(DETAIL_PROJECT_LIMIT),
-      db
+    ]);
+
+    const approvalRows = includeApprovals
+      ? await db
         .select({
           id: approvals.id,
           companyId: approvals.companyId,
@@ -308,8 +315,8 @@ export function managementService(db: Db) {
         .from(approvals)
         .where(eq(approvals.companyId, companyId))
         .orderBy(desc(approvals.createdAt))
-        .limit(DETAIL_APPROVAL_LIMIT),
-    ]);
+        .limit(DETAIL_APPROVAL_LIMIT)
+      : [];
 
     const mappedAgents: ManagementAgentSummary[] = agentRows.map((row) => ({
       ...row,
@@ -347,7 +354,7 @@ export function managementService(db: Db) {
       health: toCompanyHealth(companySummary),
       agents: mappedAgents,
       projects: mappedProjects,
-      approvals: mappedApprovals,
+      approvals: includeApprovals ? mappedApprovals : [],
     };
   }
 

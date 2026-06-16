@@ -14,12 +14,13 @@ import {
   getEmbeddedPostgresTestSupport,
   startEmbeddedPostgresTestDatabase,
 } from "./helpers/embedded-postgres.js";
-import { TWX_CROSS_COMPANY_SOURCE_COMPANY_ID } from "../services/cross-company-agent-grants.js";
+import { CROSS_COMPANY_AGENT_SOURCE_COMPANY_IDS_ENV_VAR } from "../services/cross-company-agent-grants.js";
 
 const embeddedPostgresSupport = await getEmbeddedPostgresTestSupport();
 const describeEmbeddedPostgres = embeddedPostgresSupport.supported ? describe : describe.skip;
 
 type Db = ReturnType<typeof createDb>;
+const TEST_SOURCE_COMPANY_ID = "11111111-1111-4111-8111-111111111111";
 
 async function createApp(db: Db, actor: Express.Request["actor"]) {
   const { accessRoutes } = await import("../routes/access.js");
@@ -72,10 +73,13 @@ async function seedAgent(db: Db, companyId: string, label: string) {
 describeEmbeddedPostgres("cross-company agent grant admin routes", () => {
   let db!: Db;
   let tempDb: Awaited<ReturnType<typeof startEmbeddedPostgresTestDatabase>> | null = null;
+  const previousAllowedSourceCompanyIds =
+    process.env[CROSS_COMPANY_AGENT_SOURCE_COMPANY_IDS_ENV_VAR];
 
   beforeAll(async () => {
     tempDb = await startEmbeddedPostgresTestDatabase("paperclip-cross-company-grant-routes-");
     db = createDb(tempDb.connectionString);
+    process.env[CROSS_COMPANY_AGENT_SOURCE_COMPANY_IDS_ENV_VAR] = TEST_SOURCE_COMPANY_ID;
   }, 20_000);
 
   afterEach(async () => {
@@ -86,11 +90,17 @@ describeEmbeddedPostgres("cross-company agent grant admin routes", () => {
   });
 
   afterAll(async () => {
+    if (previousAllowedSourceCompanyIds === undefined) {
+      delete process.env[CROSS_COMPANY_AGENT_SOURCE_COMPANY_IDS_ENV_VAR];
+    } else {
+      process.env[CROSS_COMPANY_AGENT_SOURCE_COMPANY_IDS_ENV_VAR] =
+        previousAllowedSourceCompanyIds;
+    }
     await tempDb?.cleanup();
   });
 
   it("lets instance-admin board actors create, list, and revoke cross-company read grants", async () => {
-    const sourceCompany = await seedCompany(db, TWX_CROSS_COMPANY_SOURCE_COMPANY_ID, "TWX");
+    const sourceCompany = await seedCompany(db, TEST_SOURCE_COMPANY_ID, "Source");
     const targetCompany = await seedCompany(db, undefined, "Target");
     const sourceAgent = await seedAgent(db, sourceCompany.id, "Source");
     const app = await createApp(db, {
@@ -167,7 +177,7 @@ describeEmbeddedPostgres("cross-company agent grant admin routes", () => {
   }, 15_000);
 
   it("rejects non-instance-admin board actors", async () => {
-    const sourceCompany = await seedCompany(db, TWX_CROSS_COMPANY_SOURCE_COMPANY_ID, "TWXDenied");
+    const sourceCompany = await seedCompany(db, TEST_SOURCE_COMPANY_ID, "SourceDenied");
     const targetCompany = await seedCompany(db, undefined, "TargetDenied");
     const sourceAgent = await seedAgent(db, sourceCompany.id, "Denied");
     const app = await createApp(db, {

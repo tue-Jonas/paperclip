@@ -19,12 +19,13 @@ import {
   getEmbeddedPostgresTestSupport,
   startEmbeddedPostgresTestDatabase,
 } from "./helpers/embedded-postgres.js";
-import { TWX_CROSS_COMPANY_SOURCE_COMPANY_ID } from "../services/cross-company-agent-grants.js";
+import { CROSS_COMPANY_AGENT_SOURCE_COMPANY_IDS_ENV_VAR } from "../services/cross-company-agent-grants.js";
 
 const embeddedPostgresSupport = await getEmbeddedPostgresTestSupport();
 const describeEmbeddedPostgres = embeddedPostgresSupport.supported ? describe : describe.skip;
 
 type Db = ReturnType<typeof createDb>;
+const TEST_SOURCE_COMPANY_ID = "11111111-1111-4111-8111-111111111111";
 
 async function createApp(db: Db, actor: Express.Request["actor"]) {
   const { managementRoutes } = await import("../routes/management.js");
@@ -78,13 +79,13 @@ async function seedAgent(
     .then((rows) => rows[0]!);
 }
 
-async function seedProject(db: Db, companyId: string, label: string) {
+async function seedProject(db: Db, companyId: string, label: string, status = "in_progress") {
   return db
     .insert(projects)
     .values({
       companyId,
       name: `Project ${label} ${randomUUID()}`,
-      status: "in_progress",
+      status,
     })
     .returning()
     .then((rows) => rows[0]!);
@@ -117,10 +118,13 @@ async function seedIssue(db: Db, input: {
 describeEmbeddedPostgres("management routes", () => {
   let db!: Db;
   let tempDb: Awaited<ReturnType<typeof startEmbeddedPostgresTestDatabase>> | null = null;
+  const previousAllowedSourceCompanyIds =
+    process.env[CROSS_COMPANY_AGENT_SOURCE_COMPANY_IDS_ENV_VAR];
 
   beforeAll(async () => {
     tempDb = await startEmbeddedPostgresTestDatabase("paperclip-management-routes-");
     db = createDb(tempDb.connectionString);
+    process.env[CROSS_COMPANY_AGENT_SOURCE_COMPANY_IDS_ENV_VAR] = TEST_SOURCE_COMPANY_ID;
   }, 20_000);
 
   afterEach(async () => {
@@ -136,15 +140,22 @@ describeEmbeddedPostgres("management routes", () => {
   });
 
   afterAll(async () => {
+    if (previousAllowedSourceCompanyIds === undefined) {
+      delete process.env[CROSS_COMPANY_AGENT_SOURCE_COMPANY_IDS_ENV_VAR];
+    } else {
+      process.env[CROSS_COMPANY_AGENT_SOURCE_COMPANY_IDS_ENV_VAR] =
+        previousAllowedSourceCompanyIds;
+    }
     await tempDb?.cleanup();
   });
 
-  it("lets granted TWX agents read cross-company management summaries without widening writes", async () => {
-    const sourceCompany = await seedCompany(db, TWX_CROSS_COMPANY_SOURCE_COMPANY_ID, "TWX");
+  it("lets granted source-company agents read cross-company management summaries without widening writes", async () => {
+    const sourceCompany = await seedCompany(db, TEST_SOURCE_COMPANY_ID, "Source");
     const targetCompany = await seedCompany(db, undefined, "Target");
     const sourceAgent = await seedAgent(db, sourceCompany.id, "Source");
     const targetAgent = await seedAgent(db, targetCompany.id, "Target", "running");
     const targetProject = await seedProject(db, targetCompany.id, "Ops");
+    await seedProject(db, targetCompany.id, "Completed", "completed");
     const blockerIssue = await seedIssue(db, {
       companyId: targetCompany.id,
       projectId: targetProject.id,
@@ -236,6 +247,8 @@ describeEmbeddedPostgres("management routes", () => {
     expect(companiesRes.body.companies).toEqual(expect.arrayContaining([
       expect.objectContaining({
         id: targetCompany.id,
+        projectCount: 2,
+        activeProjectCount: 1,
         blockedIssueCount: 1,
         pendingApprovalCount: 1,
         activeRunCount: 1,
@@ -256,17 +269,7 @@ describeEmbeddedPostgres("management routes", () => {
         blockedIssueCount: 1,
       }),
     ]));
-    expect(detailRes.body.approvals).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        companyId: targetCompany.id,
-        payloadSummary: {
-          title: "Approve ops change",
-          summary: "Need read-only confirmation",
-          recommendedAction: "Keep it read-only",
-        },
-      }),
-    ]));
-    expect(JSON.stringify(detailRes.body.approvals)).not.toContain("must-not-leak");
+    expect(detailRes.body.approvals).toEqual([]);
 
     const issuesRes = await request(app)
       .get(`/api/management/companies/${targetCompany.id}/issues`)
@@ -287,15 +290,8 @@ describeEmbeddedPostgres("management routes", () => {
 
     const runsRes = await request(app)
       .get(`/api/management/companies/${targetCompany.id}/runs`);
-    expect(runsRes.status, JSON.stringify(runsRes.body)).toBe(200);
-    expect(runsRes.body.runs).toEqual([
-      expect.objectContaining({
-        id: run.id,
-        issueId: blockedIssue.id,
-        issueIdentifier: blockedIssue.identifier,
-        resultSummary: { summary: "Run blocked on dependency" },
-      }),
-    ]);
+    expect(runsRes.status, JSON.stringify(runsRes.body)).toBe(403);
+    expect(runsRes.body.error).toContain("management read boundary");
 
     const writeRes = await request(app)
       .post(`/api/companies/${targetCompany.id}/approvals`)
@@ -307,7 +303,7 @@ describeEmbeddedPostgres("management routes", () => {
   }, 15_000);
 
   it("denies cross-company management reads without an active grant", async () => {
-    const sourceCompany = await seedCompany(db, TWX_CROSS_COMPANY_SOURCE_COMPANY_ID, "TWXDenied");
+    const sourceCompany = await seedCompany(db, TEST_SOURCE_COMPANY_ID, "SourceDenied");
     const targetCompany = await seedCompany(db, undefined, "TargetDenied");
     const sourceAgent = await seedAgent(db, sourceCompany.id, "SourceDenied");
     const app = await createApp(db, {

@@ -49,9 +49,10 @@ export { resourceMembershipService, type ResourceMembershipPolicyHook } from "./
 export { inboxDismissalService } from "./inbox-dismissals.js";
 export { accessService } from "./access.js";
 export {
+  CROSS_COMPANY_AGENT_SOURCE_COMPANY_IDS_ENV_VAR,
   crossCompanyAgentGrantService,
   isAllowedCrossCompanyAgentSourceCompany,
-  TWX_CROSS_COMPANY_SOURCE_COMPANY_ID,
+  listAllowedCrossCompanyAgentSourceCompanyIds,
 } from "./cross-company-agent-grants.js";
 export {
   backfillPrincipalAccessCompatibility,

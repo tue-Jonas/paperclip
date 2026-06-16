@@ -1164,7 +1164,7 @@ export function authorizationService(db: Db) {
         return deny({
           action: input.action,
           reason: "deny_company_boundary",
-          explanation: "Only TWX agents can use cross-company read delegation.",
+          explanation: "Only configured source-company agents can use cross-company read delegation.",
         });
       }
 
@@ -1202,7 +1202,7 @@ export function authorizationService(db: Db) {
       return allow({
         action: input.action,
         reason: "allow_cross_company_grant",
-        explanation: "Allowed by active TWX cross-company read grant.",
+        explanation: "Allowed by active cross-company read grant.",
         crossCompanyGrant: {
           id: crossCompanyGrant.id,
           sourceCompanyId: crossCompanyGrant.sourceCompanyId,
