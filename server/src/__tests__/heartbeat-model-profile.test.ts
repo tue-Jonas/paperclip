@@ -5,6 +5,7 @@ import {
 } from "../adapters/index.js";
 import {
   mergeModelProfileAdapterConfig,
+  modelProfileRuntimeConfigForExecutionAdapter,
   normalizeModelProfileWakeContext,
   resolveModelProfileApplication,
 } from "../services/heartbeat.ts";
@@ -20,7 +21,7 @@ const cheapProfile: AdapterModelProfileDefinition = {
 };
 
 describe("heartbeat model profile application", () => {
-  it("uses the Codex local adapter cheap default when the agent has no runtime override", async () => {
+  it("uses the Codex local default model for cheap when the agent has no runtime override", async () => {
     const modelProfile = resolveModelProfileApplication({
       adapterModelProfiles: await listAdapterModelProfiles("codex_local"),
       agentRuntimeConfig: {},
@@ -35,8 +36,8 @@ describe("heartbeat model profile application", () => {
       configSource: "adapter_default",
       fallbackReason: null,
       adapterConfig: {
-        model: "gpt-5.3-codex-spark",
-        modelReasoningEffort: "high",
+        model: "gpt-5.5",
+        modelReasoningEffort: "medium",
       },
     });
   });
@@ -99,6 +100,39 @@ describe("heartbeat model profile application", () => {
       adapterConfig: {
         model: "agent-cheap",
         modelReasoningEffort: "low",
+      },
+    });
+  });
+
+  it("ignores source-agent runtime profile config when master runtime failover changes adapter", async () => {
+    const modelProfile = resolveModelProfileApplication({
+      adapterModelProfiles: await listAdapterModelProfiles("codex_local"),
+      agentRuntimeConfig: modelProfileRuntimeConfigForExecutionAdapter({
+        agentAdapterType: "claude_local",
+        executionAdapterType: "codex_local",
+        agentRuntimeConfig: {
+          modelProfiles: {
+            cheap: {
+              adapterConfig: {
+                model: "claude-haiku-4-5-20251001",
+              },
+            },
+          },
+        },
+      }),
+      issueModelProfile: "cheap",
+      contextSnapshot: {},
+    });
+
+    expect(modelProfile).toMatchObject({
+      requested: "cheap",
+      requestedBy: "issue_override",
+      applied: "cheap",
+      configSource: "adapter_default",
+      fallbackReason: null,
+      adapterConfig: {
+        model: "gpt-5.5",
+        modelReasoningEffort: "medium",
       },
     });
   });

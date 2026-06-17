@@ -17,6 +17,16 @@ const ESCAPED_JSON_SECRET_FIELD_TEXT_RE = new RegExp(
   String.raw`((?:\\")?${SECRET_FIELD_NAME_PATTERN}(?:\\")?\s*:\s*(?:\\"))[^\\\r\n]+((?:\\"))`,
   "gi",
 );
+const SECRET_LABEL_PATTERN = String.raw`(?:api[-_\s]?key|(?:access[-_\s]?|auth[-_\s]?)?token|bearer[-_\s]?token|secret|passwd|password|credential|jwt|private[-_\s]?key|cookie|connection(?:[-_\s]?string)?)`;
+const QUOTED_LABELED_SECRET_TEXT_RE = new RegExp(
+  String.raw`((?:${SECRET_LABEL_PATTERN})\s*(?::|=|\bis\b)\s*(["']))[^"'` + "`" + String.raw`\r\n]+(\2)`,
+  "gi",
+);
+const UNQUOTED_LABELED_SECRET_TEXT_RE = new RegExp(
+  String.raw`((?:${SECRET_LABEL_PATTERN})\s*(?::|=|\bis\b)\s*)([^\s"'` + "`" + String.raw`,;]+)`,
+  "gi",
+);
+const EXCERPT_LIKE_KEY_RE = /(excerpt|snippet)$/i;
 const SECRET_TEXT_HINTS = [
   "api",
   "key",
@@ -29,6 +39,7 @@ const SECRET_TEXT_HINTS = [
   "jwt",
   "private",
   "cookie",
+  "connection",
   "connectionstring",
   "sk-",
   "ghp_",
@@ -128,7 +139,39 @@ export function redactSensitiveText(input: string): string {
   return redactCommandText(
     input
       .replace(JSON_SECRET_FIELD_TEXT_RE, `$1${REDACTED_EVENT_VALUE}$2`)
+      .replace(QUOTED_LABELED_SECRET_TEXT_RE, `$1${REDACTED_EVENT_VALUE}$3`)
+      .replace(UNQUOTED_LABELED_SECRET_TEXT_RE, `$1${REDACTED_EVENT_VALUE}`)
       .replace(ESCAPED_JSON_SECRET_FIELD_TEXT_RE, `$1${REDACTED_EVENT_VALUE}$2`),
     REDACTED_EVENT_VALUE,
   );
+}
+
+export function redactSensitiveExcerpt(input: string | null | undefined, maxChars: number): string | null {
+  const normalized = (input ?? "").replace(/\s+/g, " ").trim();
+  if (!normalized) return null;
+  const redacted = redactSensitiveText(normalized);
+  return redacted.length <= maxChars ? redacted : `${redacted.slice(0, maxChars - 1)}...`;
+}
+
+export function sanitizeDisplayValue(value: unknown): unknown {
+  if (typeof value === "string") return redactSensitiveText(value);
+  if (Array.isArray(value)) return value.map((item) => sanitizeDisplayValue(item));
+  if (!isPlainObject(value)) return value;
+
+  const sanitized = sanitizeRecord(value);
+  const result: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(sanitized)) {
+    if (typeof entry === "string" && EXCERPT_LIKE_KEY_RE.test(key)) {
+      result[key] = redactSensitiveText(entry);
+      continue;
+    }
+    result[key] = sanitizeDisplayValue(entry);
+  }
+  return result;
+}
+
+export function sanitizeDisplayRecord(record: Record<string, unknown> | null): Record<string, unknown> | null {
+  if (!record) return null;
+  const sanitized = sanitizeDisplayValue(record);
+  return isPlainObject(sanitized) ? sanitized : null;
 }

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { REDACTED_EVENT_VALUE, redactEventPayload, redactSensitiveText, sanitizeRecord } from "../redaction.js";
+import {
+  REDACTED_EVENT_VALUE,
+  redactEventPayload,
+  redactSensitiveExcerpt,
+  redactSensitiveText,
+  sanitizeRecord,
+} from "../redaction.js";
 
 describe("redaction", () => {
   it("redacts sensitive keys and nested secret values", () => {
@@ -87,6 +93,33 @@ describe("redaction", () => {
     expect(result).not.toContain("paperclip-shell-secret");
     expect(result).not.toContain(githubToken);
     expect(result).not.toContain(jwt);
+  });
+
+  it("redacts labeled freeform secrets while preserving the label", () => {
+    const input = [
+      "api key: sk-live-example-secret",
+      'password is "hunter2"',
+      "token=ghp_1234567890abcdefghijklmnopqrstuvwxyz",
+      "connection string: postgres://user:pass@example.test/db",
+      "connection-string: postgres://user:pass@example.test/db",
+    ].join("\n");
+
+    const result = redactSensitiveText(input);
+
+    expect(result).toContain(`api key: ${REDACTED_EVENT_VALUE}`);
+    expect(result).toContain(`password is "${REDACTED_EVENT_VALUE}"`);
+    expect(result).toContain(`token=${REDACTED_EVENT_VALUE}`);
+    expect(result).toContain(`connection string: ${REDACTED_EVENT_VALUE}`);
+    expect(result).toContain(`connection-string: ${REDACTED_EVENT_VALUE}`);
+    expect(result).not.toContain("sk-live-example-secret");
+    expect(result).not.toContain("hunter2");
+    expect(result).not.toContain("postgres://user:pass@example.test/db");
+  });
+
+  it("builds redacted excerpts from multiline text", () => {
+    const result = redactSensitiveExcerpt("  password: hunter2\nnext step stays visible  ", 80);
+
+    expect(result).toBe(`password: ${REDACTED_EVENT_VALUE} next step stays visible`);
   });
 
   it("redacts inline secrets from command metadata without hiding safe command text", () => {

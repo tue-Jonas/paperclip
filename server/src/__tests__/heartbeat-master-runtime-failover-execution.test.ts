@@ -1,17 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import {
-  activityLog,
   agentRuntimeState,
-  agentWakeupRequests,
   agents,
-  companySkills,
   companies,
   createDb,
-  heartbeatRunEvents,
   heartbeatRuns,
-  instanceSettings,
 } from "@paperclipai/db";
 import { DEFAULT_MASTER_RUNTIME_FAILOVER } from "@paperclipai/shared";
 import {
@@ -77,16 +72,30 @@ describeEmbeddedPostgres("heartbeat master runtime failover execution", () => {
   afterEach(async () => {
     adapterExecute.mockClear();
     requestedAdapterTypes.length = 0;
-    await db.delete(activityLog);
-    await db.delete(heartbeatRunEvents);
-    await db.update(activityLog).set({ runId: null });
-    await db.delete(heartbeatRuns);
-    await db.delete(agentWakeupRequests);
-    await db.delete(agentRuntimeState);
-    await db.delete(agents);
-    await db.delete(companySkills);
-    await db.delete(companies);
-    await db.delete(instanceSettings);
+    await vi.waitFor(async () => {
+      const active = await db
+        .select({ status: heartbeatRuns.status })
+        .from(heartbeatRuns)
+        .then((rows) => rows.filter((row) => row.status === "queued" || row.status === "running"));
+      expect(active).toHaveLength(0);
+    }, { timeout: 5_000 });
+    await db.execute(sql.raw(`
+      SET client_min_messages TO warning;
+      TRUNCATE TABLE
+        "activity_log",
+        "environment_leases",
+        "environments",
+        "heartbeat_run_events",
+        "heartbeat_runs",
+        "agent_wakeup_requests",
+        "agent_runtime_state",
+        "company_skills",
+        "agents",
+        "companies",
+        "instance_settings"
+      RESTART IDENTITY CASCADE;
+      SET client_min_messages TO notice;
+    `));
   });
 
   afterAll(async () => {
@@ -122,7 +131,15 @@ describeEmbeddedPostgres("heartbeat master runtime failover execution", () => {
     await instanceSettingsService(db).updateExperimental({
       masterRuntimeFailover: {
         ...DEFAULT_MASTER_RUNTIME_FAILOVER,
-        claudeLimitedUntil: "2099-01-01T00:00:00.000Z",
+        companyLimits: {
+          [companyId]: {
+            claudeLimitedUntil: "2099-01-01T00:00:00.000Z",
+            codexLimitedUntil: null,
+            activeRuntime: "codex",
+            reason: "claude_hard_limit",
+            updatedAt: "2026-06-15T00:00:00.000Z",
+          },
+        },
       },
     });
 
@@ -200,5 +217,97 @@ describeEmbeddedPostgres("heartbeat master runtime failover execution", () => {
         executionAdapterType: "codex_local",
       },
     });
+  }, 15_000);
+
+  it("keeps master-runtime cooldowns isolated between companies", async () => {
+    const limitedCompanyId = randomUUID();
+    const healthyCompanyId = randomUUID();
+    const limitedAgentId = randomUUID();
+    const healthyAgentId = randomUUID();
+
+    await db.insert(companies).values([
+      {
+        id: limitedCompanyId,
+        name: "Limited Co",
+        issuePrefix: `L${limitedCompanyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+        requireBoardApprovalForNewAgents: false,
+      },
+      {
+        id: healthyCompanyId,
+        name: "Healthy Co",
+        issuePrefix: `H${healthyCompanyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+        requireBoardApprovalForNewAgents: false,
+      },
+    ]);
+    await db.insert(agents).values([
+      {
+        id: limitedAgentId,
+        companyId: limitedCompanyId,
+        name: "LimitedClaude",
+        role: "engineer",
+        status: "idle",
+        adapterType: "claude_local",
+        adapterConfig: { promptTemplate: "limited" },
+        runtimeConfig: {},
+        permissions: {},
+      },
+      {
+        id: healthyAgentId,
+        companyId: healthyCompanyId,
+        name: "HealthyClaude",
+        role: "engineer",
+        status: "idle",
+        adapterType: "claude_local",
+        adapterConfig: { promptTemplate: "healthy" },
+        runtimeConfig: {},
+        permissions: {},
+      },
+    ]);
+    await instanceSettingsService(db).updateExperimental({
+      masterRuntimeFailover: {
+        ...DEFAULT_MASTER_RUNTIME_FAILOVER,
+        companyLimits: {
+          [limitedCompanyId]: {
+            claudeLimitedUntil: "2099-01-01T00:00:00.000Z",
+            codexLimitedUntil: null,
+            activeRuntime: "codex",
+            reason: "claude_hard_limit",
+            updatedAt: "2026-06-15T00:00:00.000Z",
+          },
+        },
+      },
+    });
+
+    const heartbeat = heartbeatService(db);
+    const limitedRun = await heartbeat.wakeup(limitedAgentId, {
+      source: "on_demand",
+      triggerDetail: "manual",
+      contextSnapshot: {},
+    });
+    const healthyRun = await heartbeat.wakeup(healthyAgentId, {
+      source: "on_demand",
+      triggerDetail: "manual",
+      contextSnapshot: {},
+    });
+
+    expect(limitedRun).not.toBeNull();
+    expect(healthyRun).not.toBeNull();
+    await vi.waitFor(async () => {
+      expect((await heartbeat.getRun(limitedRun!.id))?.status).toBe("succeeded");
+      expect((await heartbeat.getRun(healthyRun!.id))?.status).toBe("succeeded");
+    }, { timeout: 5_000 });
+
+    expect(adapterExecute).toHaveBeenCalledTimes(2);
+    expect(adapterExecute.mock.calls.map((call) => call[0].agent.adapterType).sort()).toEqual([
+      "claude_local",
+      "codex_local",
+    ]);
+    const healthyCall = adapterExecute.mock.calls.find((call) => call[0].agent.id === healthyAgentId);
+    expect(healthyCall?.[0]).toMatchObject({
+      agent: {
+        adapterType: "claude_local",
+      },
+    });
+    expect(healthyCall?.[0].context).not.toHaveProperty("paperclipMasterRuntime");
   }, 15_000);
 });

@@ -140,6 +140,28 @@ describe.sequential("activity routes", () => {
     });
   });
 
+  it("redacts credential-like body snippets in company activity responses", async () => {
+    mockActivityService.list.mockResolvedValue([
+      {
+        id: "activity-1",
+        companyId: "company-1",
+        action: "issue.comment_added",
+        entityType: "issue",
+        entityId: "issue-1",
+        details: {
+          bodySnippet: "Board note password: hunter2",
+        },
+        createdAt: "2026-06-17T00:00:00.000Z",
+      },
+    ]);
+
+    const app = await createApp();
+    const res = await requestApp(app, (baseUrl) => request(baseUrl).get("/api/companies/company-1/activity"));
+
+    expect(res.status).toBe(200);
+    expect(res.body[0].details.bodySnippet).toBe("Board note password: ***REDACTED***");
+  });
+
   it("resolves alphanumeric issue identifiers before loading runs", async () => {
     mockIssueService.getByIdentifier.mockResolvedValue({
       id: "issue-uuid-1",

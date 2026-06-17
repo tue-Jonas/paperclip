@@ -6,7 +6,7 @@ import { validate } from "../middleware/validate.js";
 import { activityService, normalizeActivityLimit } from "../services/activity.js";
 import { assertAuthenticated, assertBoard, assertCompanyAccess } from "./authz.js";
 import { accessService, heartbeatService, issueService } from "../services/index.js";
-import { sanitizeRecord } from "../redaction.js";
+import { sanitizeDisplayRecord } from "../redaction.js";
 
 const createActivitySchema = z.object({
   actorType: z.enum(["agent", "user", "system", "plugin"]).optional().default("system"),
@@ -85,19 +85,26 @@ export function activityRoutes(db: Db) {
       limit: normalizeActivityLimit(Number(req.query.limit)),
     };
     const result = await svc.list(filters);
-    res.json(result);
+    res.json(result.map((event) => ({
+      ...event,
+      details: sanitizeDisplayRecord(event.details),
+    })));
   });
 
   router.post("/companies/:companyId/activity", validate(createActivitySchema), async (req, res) => {
     assertBoard(req);
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
+    const details = sanitizeDisplayRecord(req.body.details ?? null);
     const event = await svc.create({
       companyId,
       ...req.body,
-      details: req.body.details ? sanitizeRecord(req.body.details) : null,
+      details,
     });
-    res.status(201).json(event);
+    res.status(201).json({
+      ...event,
+      details: sanitizeDisplayRecord(event.details),
+    });
   });
 
   router.get("/issues/:id/activity", async (req, res) => {
@@ -110,7 +117,10 @@ export function activityRoutes(db: Db) {
     assertCompanyAccess(req, issue.companyId);
     if (!(await assertIssueReadAllowed(req, res, issue))) return;
     const result = await svc.forIssue(issue.id);
-    res.json(result);
+    res.json(result.map((event) => ({
+      ...event,
+      details: sanitizeDisplayRecord(event.details),
+    })));
   });
 
   router.get("/issues/:id/runs", async (req, res) => {

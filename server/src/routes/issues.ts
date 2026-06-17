@@ -111,7 +111,7 @@ import { feedbackService } from "../services/feedback.js";
 import { instanceSettingsService } from "../services/instance-settings.js";
 import { readAcceptedPlanConfirmationTarget } from "../services/issues.js";
 import { environmentService } from "../services/environments.js";
-import { redactSensitiveText } from "../redaction.js";
+import { redactSensitiveExcerpt, redactSensitiveText } from "../redaction.js";
 import {
   createCompanySearchRateLimiter,
   type CompanySearchRateLimiter,
@@ -3352,7 +3352,7 @@ export function issueRoutes(
           documentKey: keyParsed.data,
           threadId: comment.threadId,
           commentId: comment.id,
-          bodySnippet: comment.body.slice(0, 120),
+          bodySnippet: redactSensitiveExcerpt(comment.body, 120),
           ...summarizeIssueReferenceActivityDetails({
             addedReferencedIssues: referenceDiff.addedReferencedIssues.map(summarizeIssueRelationForActivity),
             removedReferencedIssues: referenceDiff.removedReferencedIssues.map(summarizeIssueRelationForActivity),
@@ -5560,7 +5560,7 @@ export function issueRoutes(
         entityId: issue.id,
         details: {
           commentId: comment.id,
-          bodySnippet: comment.body.slice(0, 120),
+          bodySnippet: redactSensitiveExcerpt(comment.body, 120),
           identifier: issue.identifier,
           issueTitle: issue.title,
           ...(resumeRequested === true ? { resumeIntent: true, followUpRequested: true } : {}),
@@ -6484,7 +6484,7 @@ export function issueRoutes(
         entityId: issue.id,
         details: {
           commentId: removed.id,
-          bodySnippet: removed.body.slice(0, 120),
+          bodySnippet: redactSensitiveExcerpt(removed.body, 120),
           identifier: issue.identifier,
           issueTitle: issue.title,
           source: "queue_cancel",
@@ -6969,7 +6969,7 @@ export function issueRoutes(
       entityId: currentIssue.id,
       details: {
         commentId: comment.id,
-        bodySnippet: comment.body.slice(0, 120),
+        bodySnippet: redactSensitiveExcerpt(comment.body, 120),
         identifier: currentIssue.identifier,
         issueTitle: currentIssue.title,
         ...(resumeRequested === true ? { resumeIntent: true, followUpRequested: true } : {}),

@@ -74,7 +74,7 @@ import { logger } from "../middleware/logger.js";
 import { getTelemetryClient } from "../telemetry.js";
 import { accessService } from "./access.js";
 import { authorizationService, type AuthorizationActor } from "./authorization.js";
-import { sanitizeRecord } from "../redaction.js";
+import { redactSensitiveExcerpt, sanitizeRecord } from "../redaction.js";
 
 // ---------------------------------------------------------------------------
 // SSRF protection for plugin HTTP fetch
@@ -2023,7 +2023,7 @@ export function buildHostServices(
           details: {
             identifier: issue.identifier,
             commentId: comment.id,
-            bodySnippet: comment.body.slice(0, 120),
+            bodySnippet: redactSensitiveExcerpt(comment.body, 120),
           },
         });
         return comment;

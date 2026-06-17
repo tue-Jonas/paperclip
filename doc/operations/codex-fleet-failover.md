@@ -43,6 +43,12 @@ time. That avoids the known trap where a previous `claudeLimitedUntil` or
 `codexLimitedUntil` timestamp keeps affecting automatic routing after account
 state has changed.
 
+Automatic hard-limit cooldowns are scoped per company. When one company's
+Claude or Codex master runtime hits a quota window, Paperclip records the
+cooldown under that company and only that company's automatic fallback routing
+uses it. Other companies continue to resolve their own Claude/Codex route from
+their own cooldown state.
+
 Expected setting:
 
 ```json
@@ -99,10 +105,14 @@ pnpm paperclipai runtime force-claude --clear-limits
 
 - This is a fleet execution switch, not a data migration. Do not bulk-edit
   `agents.adapter_type` for this incident response path.
+- Manual `force_codex` / `force_claude` modes remain instance-wide emergency
+  controls. They intentionally override every company's master-runtime routing.
 - `force_codex` bypasses automatic Claude/Codex limit protection by design. If
   Codex itself hard-limits while force mode is active, runs fail instead of
   silently downgrading to another adapter.
 - Automatic mode still keeps the old rate-limit failover behavior:
   `claude_local` fails over to `codex_local` when Claude is limited, and vice
-  versa. If both master runtimes are marked limited, Paperclip blocks the issue
-  with `master_runtime_all_limited`.
+  versa for the same company. If both master runtimes are marked limited for
+  that company, Paperclip blocks the issue with `master_runtime_all_limited`.
+- `runtime clear-limits` and `--clear-limits` clear all stored company cooldown
+  buckets as well as legacy top-level cooldown fields.

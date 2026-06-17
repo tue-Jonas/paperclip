@@ -172,6 +172,9 @@ describeEmbeddedPostgres("GET /companies/:companyId/users/:userSlug/profile", ()
       action: "issue.updated",
       entityType: "issue",
       entityId: doneIssueId,
+      details: {
+        bodySnippet: "Board follow-up password: hunter2",
+      },
       createdAt: now,
     });
     await db.insert(costEvents).values({
@@ -212,6 +215,7 @@ describeEmbeddedPostgres("GET /companies/:companyId/users/:userSlug/profile", ()
     });
     expect(response.body.recentIssues.map((issue: { identifier: string }) => issue.identifier)).toEqual(["USR-1", "USR-2"]);
     expect(response.body.recentActivity[0].action).toBe("issue.updated");
+    expect(response.body.recentActivity[0].details.bodySnippet).toBe("Board follow-up password: ***REDACTED***");
     expect(response.body.topAgents[0]).toMatchObject({ agentId, agentName: "Coder", costCents: 42 });
     expect(response.body.topProviders[0]).toMatchObject({ provider: "openai", model: "gpt-test", costCents: 42 });
   });

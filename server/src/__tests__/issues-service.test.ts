@@ -3088,6 +3088,87 @@ describeEmbeddedPostgres("issueService blockers and dependency wake readiness", 
     ]);
   });
 
+  it("lists dependency-ready blocked issues for heartbeat audits", async () => {
+    const companyId = randomUUID();
+    const assigneeAgentId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+    await db.insert(agents).values({
+      id: assigneeAgentId,
+      companyId,
+      name: "CodexCoder",
+      role: "engineer",
+      status: "active",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    });
+
+    const wakeableNoBlockers = randomUUID();
+    const doneBlocker = randomUUID();
+    const wakeableWithDoneBlocker = randomUUID();
+    const unresolvedBlocker = randomUUID();
+    const stillBlocked = randomUUID();
+    const externalWait = randomUUID();
+    const monitoredWait = randomUUID();
+    const userOwnedWait = randomUUID();
+
+    await db.insert(issues).values([
+      { id: wakeableNoBlockers, companyId, title: "Blocked without blockers", status: "blocked", priority: "medium", assigneeAgentId },
+      { id: doneBlocker, companyId, title: "Done blocker", status: "done", priority: "medium" },
+      { id: wakeableWithDoneBlocker, companyId, title: "Blocked with done blocker", status: "blocked", priority: "medium", assigneeAgentId },
+      { id: unresolvedBlocker, companyId, title: "Todo blocker", status: "todo", priority: "medium" },
+      { id: stillBlocked, companyId, title: "Blocked with unresolved blocker", status: "blocked", priority: "medium", assigneeAgentId },
+      {
+        id: externalWait,
+        companyId,
+        title: "External wait",
+        description: "External owner: Vendor\nExternal action: Reply with DNS details",
+        status: "blocked",
+        priority: "medium",
+        assigneeAgentId,
+      },
+      {
+        id: monitoredWait,
+        companyId,
+        title: "Monitored wait",
+        status: "blocked",
+        priority: "medium",
+        assigneeAgentId,
+        monitorNextCheckAt: new Date("2026-06-17T12:00:00.000Z"),
+      },
+      {
+        id: userOwnedWait,
+        companyId,
+        title: "User wait",
+        status: "blocked",
+        priority: "medium",
+        assigneeAgentId,
+        assigneeUserId: "user-1",
+      },
+    ]);
+    await svc.update(wakeableWithDoneBlocker, { blockedByIssueIds: [doneBlocker] });
+    await svc.update(stillBlocked, { blockedByIssueIds: [unresolvedBlocker] });
+
+    const rows = await svc.listWakeableBlockedIssues(companyId, { limit: 20 });
+    const rowIds = rows.map((row) => row.id);
+
+    expect(rowIds).toEqual(expect.arrayContaining([wakeableNoBlockers, wakeableWithDoneBlocker]));
+    expect(rowIds).not.toEqual(expect.arrayContaining([
+      stillBlocked,
+      externalWait,
+      monitoredWait,
+      userOwnedWait,
+    ]));
+    expect(rows.find((row) => row.id === wakeableWithDoneBlocker)?.blockerIssueIds).toEqual([doneBlocker]);
+  });
+
   it("gates dependents on the workspace-finalize barrier when a done blocker's execution workspace has not synced back", async () => {
     const companyId = randomUUID();
     const assigneeAgentId = randomUUID();
@@ -3455,6 +3536,132 @@ describeEmbeddedPostgres("issueService blockers and dependency wake readiness", 
       ],
       childIssueSummaryTruncated: false,
     });
+  });
+
+  it("cancels all non-terminal descendants when the root issue is cancelled", async () => {
+    const companyId = randomUUID();
+    const assigneeAgentId = randomUUID();
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+    await db.insert(agents).values({
+      id: assigneeAgentId,
+      companyId,
+      name: "CodexCoder",
+      role: "engineer",
+      status: "active",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    });
+
+    const parentId = randomUUID();
+    const childId = randomUUID();
+    const grandchildId = randomUUID();
+    const terminalChildId = randomUUID();
+    const terminalGrandchildId = randomUUID();
+    await db.insert(issues).values([
+      {
+        id: parentId,
+        companyId,
+        title: "Parent issue",
+        status: "in_progress",
+        priority: "medium",
+        assigneeAgentId,
+      },
+      {
+        id: childId,
+        companyId,
+        parentId,
+        title: "Child issue",
+        status: "in_progress",
+        priority: "medium",
+        assigneeAgentId,
+        checkoutRunId: randomUUID(),
+        executionRunId: randomUUID(),
+        executionAgentNameKey: "agent-1",
+        executionLockedAt: new Date("2026-06-01T00:00:00.000Z"),
+      },
+      {
+        id: grandchildId,
+        companyId,
+        parentId: childId,
+        title: "Grandchild issue",
+        status: "blocked",
+        priority: "medium",
+        assigneeAgentId,
+        checkoutRunId: randomUUID(),
+        executionRunId: randomUUID(),
+      },
+      {
+        id: terminalChildId,
+        companyId,
+        parentId,
+        title: "Terminal child",
+        status: "done",
+        priority: "medium",
+      },
+      {
+        id: terminalGrandchildId,
+        companyId,
+        parentId: terminalChildId,
+        title: "Terminal grandchild",
+        status: "cancelled",
+        priority: "medium",
+      },
+    ]);
+
+    await svc.update(parentId, { status: "cancelled" });
+
+    const [parent, child, grandchild, terminalChild, terminalGrandchild] = await Promise.all([
+      db
+        .select()
+        .from(issues)
+        .where(eq(issues.id, parentId))
+        .then((rows) => rows[0] ?? null),
+      db
+        .select()
+        .from(issues)
+        .where(eq(issues.id, childId))
+        .then((rows) => rows[0] ?? null),
+      db
+        .select()
+        .from(issues)
+        .where(eq(issues.id, grandchildId))
+        .then((rows) => rows[0] ?? null),
+      db
+        .select()
+        .from(issues)
+        .where(eq(issues.id, terminalChildId))
+        .then((rows) => rows[0] ?? null),
+      db
+        .select()
+        .from(issues)
+        .where(eq(issues.id, terminalGrandchildId))
+        .then((rows) => rows[0] ?? null),
+    ]);
+
+    expect(parent).toMatchObject({ id: parentId, status: "cancelled" });
+    expect(child).toMatchObject({
+      id: childId,
+      status: "cancelled",
+      checkoutRunId: null,
+      executionRunId: null,
+      executionAgentNameKey: null,
+      executionLockedAt: null,
+    });
+    expect(grandchild).toMatchObject({
+      id: grandchildId,
+      status: "cancelled",
+      checkoutRunId: null,
+      executionRunId: null,
+    });
+    expect(terminalChild).toMatchObject({ id: terminalChildId, status: "done" });
+    expect(terminalGrandchild).toMatchObject({ id: terminalGrandchildId, status: "cancelled" });
   });
 });
 

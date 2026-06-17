@@ -42,6 +42,25 @@ process.exit(1);
   await fs.chmod(commandPath, 0o755);
 }
 
+async function writeModelLimitThenFallbackCodexCommand(commandPath: string, capturePath: string): Promise<void> {
+  const script = `#!/usr/bin/env node
+const fs = require("node:fs");
+const argv = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(capturePath)}, JSON.stringify({ argv }) + "\\n", "utf8");
+const modelIndex = argv.indexOf("--model");
+const model = modelIndex >= 0 ? argv[modelIndex + 1] : "";
+if (model === "gpt-5.5") {
+  console.log(JSON.stringify({ type: "error", message: "You've hit your usage limit for GPT-5.5. Switch to another model now, or try again at 11:31 PM." }));
+  process.exit(1);
+}
+console.log(JSON.stringify({ type: "thread.started", thread_id: "codex-session-fallback-model" }));
+console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "fallback ok" } }));
+console.log(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 2, cached_input_tokens: 0, output_tokens: 1 } }));
+`;
+  await fs.writeFile(commandPath, script, "utf8");
+  await fs.chmod(commandPath, 0o755);
+}
+
 type CapturePayload = {
   argv: string[];
   prompt: string;
@@ -599,6 +618,66 @@ describe("codex execute", () => {
       );
     } finally {
       vi.useRealTimers();
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("retries with the next approved Codex model when the configured model is capped", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-codex-execute-model-fallback-"));
+    const workspace = path.join(root, "workspace");
+    const commandPath = path.join(root, "codex");
+    const capturePath = path.join(root, "attempts.jsonl");
+    await fs.mkdir(workspace, { recursive: true });
+    await writeModelLimitThenFallbackCodexCommand(commandPath, capturePath);
+
+    const previousHome = process.env.HOME;
+    process.env.HOME = root;
+
+    try {
+      const logs: LogEntry[] = [];
+      const result = await execute({
+        runId: "run-model-fallback",
+        agent: {
+          id: "agent-1",
+          companyId: "company-1",
+          name: "Codex Coder",
+          adapterType: "codex_local",
+          adapterConfig: {},
+        },
+        runtime: {
+          sessionId: null,
+          sessionParams: null,
+          sessionDisplayId: null,
+          taskKey: null,
+        },
+        config: {
+          command: commandPath,
+          cwd: workspace,
+          model: "gpt-5.5",
+          promptTemplate: "Follow the paperclip heartbeat.",
+        },
+        context: {},
+        authToken: "run-jwt-token",
+        onLog: async (stream, chunk) => {
+          logs.push({ stream, chunk });
+        },
+      });
+
+      const attempts = (await fs.readFile(capturePath, "utf8"))
+        .trim()
+        .split(/\n/)
+        .map((line) => JSON.parse(line) as { argv: string[] });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.model).toBe("gpt-5.4");
+      expect(result.summary).toBe("fallback ok");
+      expect(attempts).toHaveLength(2);
+      expect(attempts[0]?.argv).toEqual(expect.arrayContaining(["--model", "gpt-5.5"]));
+      expect(attempts[1]?.argv).toEqual(expect.arrayContaining(["--model", "gpt-5.4"]));
+      expect(logs.some((entry) => entry.chunk.includes('retrying with "gpt-5.4"'))).toBe(true);
+    } finally {
       if (previousHome === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome;
       await fs.rm(root, { recursive: true, force: true });

@@ -8,6 +8,7 @@ export const SANDBOX_INSTALL_COMMAND = "npm install -g @openai/codex";
 export const DEFAULT_CODEX_LOCAL_MODEL = "gpt-5.5";
 export const DEFAULT_CODEX_LOCAL_BYPASS_APPROVALS_AND_SANDBOX = true;
 export const CODEX_LOCAL_FAST_MODE_SUPPORTED_MODELS = ["gpt-5.5", "gpt-5.4"] as const;
+export const CODEX_LOCAL_MODEL_FALLBACK_ORDER = [DEFAULT_CODEX_LOCAL_MODEL, "gpt-5.4"] as const;
 export const CODEX_LOCAL_DEPRECATED_MODEL_ALIASES: Record<string, string> = {
   "gpt-5.3-codex": "gpt-5.5",
 } as const;
@@ -45,6 +46,15 @@ export function isCodexLocalFastModeSupported(model: string | null | undefined):
   );
 }
 
+export function codexLocalModelFallbacksAfterLimit(model: string | null | undefined): string[] {
+  const current = normalizeCodexLocalModel(model) || DEFAULT_CODEX_LOCAL_MODEL;
+  const currentIndex = CODEX_LOCAL_MODEL_FALLBACK_ORDER.indexOf(
+    current as (typeof CODEX_LOCAL_MODEL_FALLBACK_ORDER)[number],
+  );
+  if (currentIndex < 0) return [];
+  return CODEX_LOCAL_MODEL_FALLBACK_ORDER.slice(currentIndex + 1);
+}
+
 export const models = [
   { id: DEFAULT_CODEX_LOCAL_MODEL, label: DEFAULT_CODEX_LOCAL_MODEL },
   { id: "gpt-5.4", label: "gpt-5.4" },
@@ -62,11 +72,10 @@ export const modelProfiles: AdapterModelProfileDefinition[] = [
   {
     key: "cheap",
     label: "Cheap",
-    description: "Use the lowest-cost known Codex local model lane without changing the primary model.",
+    description: "Use the normal Codex local default lane without changing the primary model.",
     adapterConfig: {
-      model: "gpt-5.3-codex-spark",
-      // Spark is the cheap lane by model price; high effort keeps Codex coding behavior usable for delegated work.
-      modelReasoningEffort: "high",
+      model: DEFAULT_CODEX_LOCAL_MODEL,
+      modelReasoningEffort: "medium",
     },
     source: "adapter_default",
   },

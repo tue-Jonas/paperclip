@@ -20,6 +20,7 @@ import {
   type IssueExecutionMonitorPolicy,
   type IssueExecutionMonitorRecoveryPolicy,
   type ModelProfileKey,
+  type MasterRuntimeCompanyLimitState,
   type MasterRuntimeFailoverSettings,
   type MasterRuntimeKey,
   type RoutineRevisionSnapshotV1,
@@ -205,6 +206,10 @@ const MAX_LIVE_LOG_CHUNK_BYTES = 8 * 1024;
 const MAX_PERSISTED_LOG_CHUNK_CHARS = 64 * 1024;
 const MAX_RUN_EVENT_PAYLOAD_STRING_CHARS = 16 * 1024;
 const MAX_RUN_EVENT_PAYLOAD_ARRAY_ITEMS = 50;
+const BLOCKED_ISSUE_AUDIT_WAKE_REASON = "blocked_issue_dependency_audit";
+const BLOCKED_ISSUE_AUDIT_CANDIDATE_LIMIT_PER_COMPANY = 100;
+const BLOCKED_ISSUE_AUDIT_WAKE_LIMIT_PER_COMPANY = 25;
+const BLOCKED_ISSUE_AUDIT_WAKE_COOLDOWN_MS = 30 * 60 * 1000;
 
 export function redactDetectedSuccessfulRunProgressSummaryForBoard(
   summary: string,
@@ -1550,23 +1555,85 @@ export function normalizeMasterRuntimeFailoverSettings(
   const settings = raw ?? DEFAULT_MASTER_RUNTIME_FAILOVER;
   const claudeLimitedUntil = parseFutureInstant(settings.claudeLimitedUntil, now)?.toISOString() ?? null;
   const codexLimitedUntil = parseFutureInstant(settings.codexLimitedUntil, now)?.toISOString() ?? null;
+  const mode = settings.mode ?? "auto";
   const activeRuntime =
-    settings.mode === "force_claude"
+    mode === "force_claude"
       ? "claude"
-      : settings.mode === "force_codex"
+      : mode === "force_codex"
         ? "codex"
         : claudeLimitedUntil && !codexLimitedUntil
           ? "codex"
           : codexLimitedUntil && !claudeLimitedUntil
             ? "claude"
             : null;
+  const companyLimits = normalizeMasterRuntimeCompanyLimits(settings.companyLimits, mode, now);
   return {
-    mode: settings.mode ?? "auto",
+    mode,
     claudeLimitedUntil,
     codexLimitedUntil,
     activeRuntime,
     reason: settings.reason ?? null,
     updatedAt: settings.updatedAt ?? null,
+    ...(companyLimits ? { companyLimits } : {}),
+  };
+}
+
+function normalizeMasterRuntimeCompanyLimits(
+  raw: Record<string, MasterRuntimeCompanyLimitState> | null | undefined,
+  mode: MasterRuntimeFailoverSettings["mode"],
+  now: Date,
+): Record<string, MasterRuntimeCompanyLimitState> | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const entries = Object.entries(raw)
+    .map(([companyId, value]) => {
+      if (!isUuidLike(companyId) || !value || typeof value !== "object") return null;
+      const claudeLimitedUntil = parseFutureInstant(value.claudeLimitedUntil, now)?.toISOString() ?? null;
+      const codexLimitedUntil = parseFutureInstant(value.codexLimitedUntil, now)?.toISOString() ?? null;
+      if (!claudeLimitedUntil && !codexLimitedUntil) return null;
+      const activeRuntime =
+        mode === "force_claude"
+          ? "claude"
+          : mode === "force_codex"
+            ? "codex"
+            : claudeLimitedUntil && !codexLimitedUntil
+              ? "codex"
+              : codexLimitedUntil && !claudeLimitedUntil
+                ? "claude"
+                : null;
+      return [
+        companyId,
+        {
+          claudeLimitedUntil,
+          codexLimitedUntil,
+          activeRuntime,
+          reason: value.reason ?? null,
+          updatedAt: value.updatedAt ?? null,
+        } satisfies MasterRuntimeCompanyLimitState,
+      ] as const;
+    })
+    .filter((entry): entry is readonly [string, MasterRuntimeCompanyLimitState] => entry !== null);
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+function masterRuntimeSettingsForCompany(input: {
+  settings: MasterRuntimeFailoverSettings | null | undefined;
+  companyId?: string | null;
+  now: Date;
+}): MasterRuntimeFailoverSettings {
+  const normalized = normalizeMasterRuntimeFailoverSettings(input.settings, input.now);
+  const companyId = input.companyId ?? null;
+  if (!companyId) return normalized;
+  const companyLimit = normalized.companyLimits?.[companyId];
+  return {
+    ...normalized,
+    claudeLimitedUntil: companyLimit?.claudeLimitedUntil ?? null,
+    codexLimitedUntil: companyLimit?.codexLimitedUntil ?? null,
+    activeRuntime:
+      normalized.mode === "force_claude" || normalized.mode === "force_codex"
+        ? normalized.activeRuntime
+        : companyLimit?.activeRuntime ?? null,
+    reason: companyLimit?.reason ?? normalized.reason,
+    updatedAt: companyLimit?.updatedAt ?? normalized.updatedAt,
   };
 }
 
@@ -1582,6 +1649,7 @@ function isMasterRuntimeLimited(
 export function resolveMasterRuntimeAdapter(input: {
   adapterType: string;
   settings: MasterRuntimeFailoverSettings | null | undefined;
+  companyId?: string | null;
   now?: Date;
 }): {
   sourceRuntime: MasterRuntimeKey | null;
@@ -1602,7 +1670,11 @@ export function resolveMasterRuntimeAdapter(input: {
   }
 
   const now = input.now ?? new Date();
-  const settings = normalizeMasterRuntimeFailoverSettings(input.settings, now);
+  const settings = masterRuntimeSettingsForCompany({
+    settings: input.settings,
+    companyId: input.companyId,
+    now,
+  });
   if (settings.mode === "force_claude") {
     return {
       sourceRuntime,
@@ -1789,6 +1861,14 @@ export function resolveModelProfileApplication(input: {
       ...runtimeProfile.adapterConfig,
     },
   };
+}
+
+export function modelProfileRuntimeConfigForExecutionAdapter(input: {
+  agentAdapterType: string;
+  executionAdapterType: string;
+  agentRuntimeConfig: unknown;
+}): unknown {
+  return input.agentAdapterType === input.executionAdapterType ? input.agentRuntimeConfig : {};
 }
 
 export function mergeModelProfileAdapterConfig(input: {
@@ -6724,13 +6804,17 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       (await instanceSettings.getExperimental()).masterRuntimeFailover,
       now,
     );
+    const currentCompany = masterRuntimeSettingsForCompany({
+      settings: current,
+      companyId: input.run.companyId,
+      now,
+    });
     const limitedUntil = masterRuntimeLimitUntil(input.adapterResult, now).toISOString();
     const fallbackRuntime = oppositeMasterRuntime(input.runtime);
-    const fallbackLimited = isMasterRuntimeLimited(current, fallbackRuntime, now);
-    const next: MasterRuntimeFailoverSettings = {
-      ...current,
-      claudeLimitedUntil: input.runtime === "claude" ? limitedUntil : current.claudeLimitedUntil,
-      codexLimitedUntil: input.runtime === "codex" ? limitedUntil : current.codexLimitedUntil,
+    const fallbackLimited = isMasterRuntimeLimited(currentCompany, fallbackRuntime, now);
+    const companyLimit: MasterRuntimeCompanyLimitState = {
+      claudeLimitedUntil: input.runtime === "claude" ? limitedUntil : currentCompany.claudeLimitedUntil,
+      codexLimitedUntil: input.runtime === "codex" ? limitedUntil : currentCompany.codexLimitedUntil,
       activeRuntime:
         current.mode === "force_claude"
           ? "claude"
@@ -6742,6 +6826,23 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       reason: `${input.runtime}_hard_limit`,
       updatedAt: now.toISOString(),
     };
+    const next: MasterRuntimeFailoverSettings = {
+      ...current,
+      claudeLimitedUntil: null,
+      codexLimitedUntil: null,
+      activeRuntime:
+        current.mode === "force_claude"
+          ? "claude"
+          : current.mode === "force_codex"
+            ? "codex"
+            : null,
+      reason: `${input.runtime}_hard_limit_company_scoped`,
+      updatedAt: now.toISOString(),
+      companyLimits: {
+        ...(current.companyLimits ?? {}),
+        [input.run.companyId]: companyLimit,
+      },
+    };
 
     await instanceSettings.updateExperimental({ masterRuntimeFailover: next });
     await appendRunEvent(input.run, await nextRunEventSeq(input.run.id), {
@@ -6752,17 +6853,22 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         ? "master runtime limit recorded; opposite master is also limited"
         : "master runtime limit recorded",
       payload: {
+        companyId: input.run.companyId,
         runtime: input.runtime,
         fallbackRuntime,
         limitedUntil,
         fallbackLimited,
         mode: current.mode,
-        activeRuntime: next.activeRuntime,
+        activeRuntime: companyLimit.activeRuntime,
       },
     });
 
     return {
-      settings: next,
+      settings: masterRuntimeSettingsForCompany({
+        settings: next,
+        companyId: input.run.companyId,
+        now,
+      }),
       limitedUntil,
       fallbackRuntime,
       fallbackLimited,
@@ -8389,6 +8495,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     const masterRuntimeResolution = resolveMasterRuntimeAdapter({
       adapterType: agent.adapterType,
       settings: experimentalSettings.masterRuntimeFailover,
+      companyId: agent.companyId,
     });
     let issueContext = issueId ? await getIssueExecutionContext(agent.companyId, issueId) : null;
     const issueDependencyReadiness = issueId
@@ -8466,9 +8573,11 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         finishedAt: new Date(),
         resultJson: {
           stopReason: "master_runtime_all_limited",
-          masterRuntimeFailover: normalizeMasterRuntimeFailoverSettings(
-            experimentalSettings.masterRuntimeFailover,
-          ),
+          masterRuntimeFailover: masterRuntimeSettingsForCompany({
+            settings: experimentalSettings.masterRuntimeFailover,
+            companyId: agent.companyId,
+            now: new Date(),
+          }),
         },
       });
       await setWakeupStatus(run.wakeupRequestId, "failed", {
@@ -8933,7 +9042,11 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     }
     const modelProfileApplication = resolveModelProfileApplication({
       adapterModelProfiles,
-      agentRuntimeConfig: agent.runtimeConfig,
+      agentRuntimeConfig: modelProfileRuntimeConfigForExecutionAdapter({
+        agentAdapterType: agent.adapterType,
+        executionAdapterType,
+        agentRuntimeConfig: agent.runtimeConfig,
+      }),
       issueModelProfile: issueAssigneeOverrides?.modelProfile ?? null,
       contextSnapshot: context,
       profileResolutionFallbackReason,
@@ -11646,6 +11759,94 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     return newRun;
   }
 
+  async function recentlyAuditedBlockedIssueIds(
+    companyId: string,
+    issueIds: string[],
+    since: Date,
+  ): Promise<Set<string>> {
+    const uniqueIssueIds = [...new Set(issueIds)];
+    if (uniqueIssueIds.length === 0) return new Set();
+
+    const wakeIssueId = sql<string | null>`${agentWakeupRequests.payload} ->> 'issueId'`;
+    const rows = await db
+      .select({ issueId: wakeIssueId })
+      .from(agentWakeupRequests)
+      .where(
+        and(
+          eq(agentWakeupRequests.companyId, companyId),
+          eq(agentWakeupRequests.reason, BLOCKED_ISSUE_AUDIT_WAKE_REASON),
+          gt(agentWakeupRequests.requestedAt, since),
+          inArray(wakeIssueId, uniqueIssueIds),
+        ),
+      );
+
+    return new Set(rows.flatMap((row) => row.issueId ? [row.issueId] : []));
+  }
+
+  async function auditWakeableBlockedIssuesForCompanies(companyIds: string[], now: Date) {
+    const uniqueCompanyIds = [...new Set(companyIds)];
+    let checked = 0;
+    let triggered = 0;
+    let skipped = 0;
+
+    for (const companyId of uniqueCompanyIds) {
+      const candidates = await issuesSvc.listWakeableBlockedIssues(companyId, {
+        limit: BLOCKED_ISSUE_AUDIT_CANDIDATE_LIMIT_PER_COMPANY,
+      });
+      checked += candidates.length;
+      if (candidates.length === 0) continue;
+
+      const cooldownSince = new Date(now.getTime() - BLOCKED_ISSUE_AUDIT_WAKE_COOLDOWN_MS);
+      const recentlyAudited = await recentlyAuditedBlockedIssueIds(
+        companyId,
+        candidates.map((candidate) => candidate.id),
+        cooldownSince,
+      );
+
+      let wokeForCompany = 0;
+      for (const candidate of candidates) {
+        if (wokeForCompany >= BLOCKED_ISSUE_AUDIT_WAKE_LIMIT_PER_COMPANY) break;
+        if (recentlyAudited.has(candidate.id)) {
+          skipped += 1;
+          continue;
+        }
+
+        try {
+          const run = await enqueueWakeup(candidate.assigneeAgentId, {
+            source: "automation",
+            triggerDetail: "system",
+            reason: BLOCKED_ISSUE_AUDIT_WAKE_REASON,
+            requestedByActorType: "system",
+            requestedByActorId: "blocked_issue_audit",
+            payload: {
+              issueId: candidate.id,
+              blockerIssueIds: candidate.blockerIssueIds,
+            },
+            contextSnapshot: {
+              issueId: candidate.id,
+              taskId: candidate.id,
+              wakeReason: BLOCKED_ISSUE_AUDIT_WAKE_REASON,
+              source: "scheduler.blocked_issue_audit",
+              blockerIssueIds: candidate.blockerIssueIds,
+              now: now.toISOString(),
+            },
+          });
+          if (run) triggered += 1;
+          else skipped += 1;
+          wokeForCompany += 1;
+        } catch (err) {
+          skipped += 1;
+          logger.warn(
+            { err, companyId, issueId: candidate.id, agentId: candidate.assigneeAgentId },
+            "failed to enqueue blocked issue audit wake",
+          );
+        }
+      }
+    }
+
+    return { checked, triggered, skipped };
+  }
+
   async function listProjectScopedRunIds(companyId: string, projectId: string) {
     const runIssueId = sql<string | null>`${heartbeatRuns.contextSnapshot} ->> 'issueId'`;
     const effectiveProjectId = sql<string | null>`coalesce(${heartbeatRuns.contextSnapshot} ->> 'projectId', ${issues.projectId}::text)`;
@@ -12252,12 +12453,22 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         else skipped += 1;
       }
 
+      let blockedIssueAudit = { checked: 0, triggered: 0, skipped: 0 };
+      try {
+        blockedIssueAudit = await auditWakeableBlockedIssuesForCompanies(
+          allAgents.map((agent) => agent.companyId),
+          now,
+        );
+      } catch (err) {
+        logger.warn({ err }, "blocked issue dependency audit failed");
+      }
+
       const issueMonitors = await tickDueIssueMonitors(now);
 
       return {
-        checked: checked + issueMonitors.checked,
-        enqueued: enqueued + issueMonitors.triggered,
-        skipped: skipped + issueMonitors.skipped,
+        checked: checked + blockedIssueAudit.checked + issueMonitors.checked,
+        enqueued: enqueued + blockedIssueAudit.triggered + issueMonitors.triggered,
+        skipped: skipped + blockedIssueAudit.skipped + issueMonitors.skipped,
       };
     },
 

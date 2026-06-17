@@ -259,3 +259,11 @@ export function isCodexTransientUpstreamError(input: {
   // becomes safe again.
   return CODEX_REMOTE_COMPACTION_RE.test(haystack) || /high\s+demand|temporary\s+errors/i.test(haystack);
 }
+
+export function isCodexModelSwitchLimitError(input: {
+  stdout?: string | null;
+  stderr?: string | null;
+  errorMessage?: string | null;
+}): boolean {
+  return CODEX_USAGE_LIMIT_RE.test(buildCodexErrorHaystack(input));
+}

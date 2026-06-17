@@ -17,6 +17,7 @@ import type {
   UserProfileWindowStats,
 } from "@paperclipai/shared";
 import { notFound } from "../errors.js";
+import { sanitizeDisplayRecord } from "../redaction.js";
 import { assertCompanyAccess } from "./authz.js";
 
 type CompanyUserRow = {
@@ -412,7 +413,10 @@ export function userProfileRoutes(db: Db) {
         status: issue.status as UserProfileResponse["recentIssues"][number]["status"],
         priority: issue.priority as UserProfileResponse["recentIssues"][number]["priority"],
       })),
-      recentActivity,
+      recentActivity: recentActivity.map((event) => ({
+        ...event,
+        details: sanitizeDisplayRecord(event.details),
+      })),
       topAgents: topAgents.map((entry) => ({
         ...entry,
         costCents: Number(entry.costCents),

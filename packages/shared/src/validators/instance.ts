@@ -51,6 +51,13 @@ export const masterRuntimeFailoverSettingsSchema = z.object({
   activeRuntime: z.enum(["claude", "codex"]).nullable().default(null),
   reason: z.string().nullable().default(null),
   updatedAt: z.string().datetime().nullable().default(null),
+  companyLimits: z.record(z.string().uuid(), z.object({
+    claudeLimitedUntil: z.string().datetime().nullable().default(null),
+    codexLimitedUntil: z.string().datetime().nullable().default(null),
+    activeRuntime: z.enum(["claude", "codex"]).nullable().default(null),
+    reason: z.string().nullable().default(null),
+    updatedAt: z.string().datetime().nullable().default(null),
+  }).strict()).optional(),
 }).strict();
 
 export const instanceExperimentalSettingsSchema = z.object({

@@ -960,4 +960,72 @@ describeEmbeddedPostgres("heartbeat dependency-aware queued run selection", () =
       },
     });
   });
+
+  it("audits wakeable blocked issues during timer ticks", async () => {
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+    const issueId = randomUUID();
+    const tickAt = new Date("2026-06-17T15:00:00.000Z");
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "CodexCoder",
+      role: "engineer",
+      status: "active",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {
+        heartbeat: {
+          enabled: false,
+          wakeOnDemand: true,
+          maxConcurrentRuns: 1,
+        },
+      },
+      permissions: {},
+    });
+    await db.insert(issues).values({
+      id: issueId,
+      companyId,
+      title: "Stranded blocked issue",
+      status: "blocked",
+      priority: "medium",
+      assigneeAgentId: agentId,
+      updatedAt: new Date("2026-06-17T14:00:00.000Z"),
+    });
+
+    const firstTick = await heartbeat.tickTimers(tickAt);
+
+    expect(firstTick).toMatchObject({ checked: 1, enqueued: 1 });
+    await expect(waitForCondition(async () => {
+      const rows = await db
+        .select({ id: heartbeatRuns.id })
+        .from(heartbeatRuns)
+        .where(sql`${heartbeatRuns.contextSnapshot} ->> 'issueId' = ${issueId}`);
+      return rows.length === 1;
+    })).resolves.toBe(true);
+
+    const wakeupsAfterFirstTick = await db
+      .select({ reason: agentWakeupRequests.reason, payload: agentWakeupRequests.payload })
+      .from(agentWakeupRequests)
+      .where(eq(agentWakeupRequests.reason, "blocked_issue_dependency_audit"));
+    expect(wakeupsAfterFirstTick).toHaveLength(1);
+    expect(wakeupsAfterFirstTick[0]?.payload).toMatchObject({ issueId });
+
+    const secondTick = await heartbeat.tickTimers(new Date("2026-06-17T15:05:00.000Z"));
+
+    expect(secondTick).toMatchObject({ checked: 1, enqueued: 0, skipped: 1 });
+    const wakeupsAfterSecondTick = await db
+      .select({ id: agentWakeupRequests.id })
+      .from(agentWakeupRequests)
+      .where(eq(agentWakeupRequests.reason, "blocked_issue_dependency_audit"));
+    expect(wakeupsAfterSecondTick).toHaveLength(1);
+  });
+
 });

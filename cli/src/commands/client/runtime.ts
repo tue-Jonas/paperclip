@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import type { MasterRuntimeFailoverSettings } from "@paperclipai/shared";
+import type { MasterRuntimeCompanyLimitState, MasterRuntimeFailoverSettings } from "@paperclipai/shared";
 import {
   addCommonClientOptions,
   handleCommandError,
@@ -27,6 +27,10 @@ function normalizeMasterRuntimeFailover(value: unknown): MasterRuntimeFailoverSe
   const record = typeof value === "object" && value !== null && !Array.isArray(value)
     ? value as Partial<MasterRuntimeFailoverSettings>
     : {};
+  const companyLimits =
+    record.companyLimits && typeof record.companyLimits === "object" && !Array.isArray(record.companyLimits)
+      ? record.companyLimits as Record<string, MasterRuntimeCompanyLimitState>
+      : undefined;
   return {
     mode: record.mode ?? DEFAULT_MASTER_RUNTIME_FAILOVER.mode,
     claudeLimitedUntil: record.claudeLimitedUntil ?? null,
@@ -34,6 +38,7 @@ function normalizeMasterRuntimeFailover(value: unknown): MasterRuntimeFailoverSe
     activeRuntime: record.activeRuntime ?? null,
     reason: record.reason ?? null,
     updatedAt: record.updatedAt ?? null,
+    ...(companyLimits ? { companyLimits } : {}),
   };
 }
 
@@ -68,6 +73,7 @@ function nextMasterRuntimeFailover(
       ? {
           claudeLimitedUntil: null,
           codexLimitedUntil: null,
+          companyLimits: {},
         }
       : {}),
     activeRuntime: mode === "force_claude" ? "claude" : mode === "force_codex" ? "codex" : null,
@@ -107,6 +113,7 @@ async function clearRuntimeLimits(options: BaseClientOptions): Promise<void> {
     ...current,
     claudeLimitedUntil: null,
     codexLimitedUntil: null,
+    companyLimits: {},
     activeRuntime: current.mode === "force_claude" ? "claude" : current.mode === "force_codex" ? "codex" : null,
     reason: "manual_clear_limits",
     updatedAt: new Date().toISOString(),

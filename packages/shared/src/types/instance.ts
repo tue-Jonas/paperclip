@@ -18,6 +18,15 @@ export interface MasterRuntimeFailoverSettings {
   activeRuntime: MasterRuntimeKey | null;
   reason: string | null;
   updatedAt: string | null;
+  companyLimits?: Record<string, MasterRuntimeCompanyLimitState>;
+}
+
+export interface MasterRuntimeCompanyLimitState {
+  claudeLimitedUntil: string | null;
+  codexLimitedUntil: string | null;
+  activeRuntime: MasterRuntimeKey | null;
+  reason: string | null;
+  updatedAt: string | null;
 }
 
 export const DEFAULT_MASTER_RUNTIME_FAILOVER: MasterRuntimeFailoverSettings = {

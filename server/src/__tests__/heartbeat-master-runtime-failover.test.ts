@@ -17,8 +17,85 @@ function settings(patch: Partial<MasterRuntimeFailoverSettings>): MasterRuntimeF
 describe("master runtime failover", () => {
   const now = new Date("2026-06-05T22:00:00.000Z");
   const future = "2026-06-06T04:00:00.000Z";
+  const companyA = "00000000-0000-4000-8000-00000000000a";
+  const companyB = "00000000-0000-4000-8000-00000000000b";
 
-  it("routes Claude to Codex when Claude is limited in auto mode", () => {
+  it("routes Claude to Codex when Claude is limited for that company in auto mode", () => {
+    expect(resolveMasterRuntimeAdapter({
+      adapterType: "claude_local",
+      settings: settings({
+        companyLimits: {
+          [companyA]: {
+            claudeLimitedUntil: future,
+            codexLimitedUntil: null,
+            activeRuntime: "codex",
+            reason: "claude_hard_limit",
+            updatedAt: now.toISOString(),
+          },
+        },
+      }),
+      companyId: companyA,
+      now,
+    })).toMatchObject({
+      sourceRuntime: "claude",
+      targetRuntime: "codex",
+      adapterType: "codex_local",
+      blocked: false,
+    });
+  });
+
+  it("routes Codex to Claude when Codex is limited for that company in auto mode", () => {
+    expect(resolveMasterRuntimeAdapter({
+      adapterType: "codex_local",
+      settings: settings({
+        companyLimits: {
+          [companyA]: {
+            claudeLimitedUntil: null,
+            codexLimitedUntil: future,
+            activeRuntime: "claude",
+            reason: "codex_hard_limit",
+            updatedAt: now.toISOString(),
+          },
+        },
+      }),
+      companyId: companyA,
+      now,
+    })).toMatchObject({
+      sourceRuntime: "codex",
+      targetRuntime: "claude",
+      adapterType: "claude_local",
+      blocked: false,
+    });
+  });
+
+  it("does not apply one company's limit window to another company", () => {
+    const sharedSettings = settings({
+      companyLimits: {
+        [companyA]: {
+          claudeLimitedUntil: future,
+          codexLimitedUntil: null,
+          activeRuntime: "codex",
+          reason: "claude_hard_limit",
+          updatedAt: now.toISOString(),
+        },
+      },
+    });
+
+    expect(resolveMasterRuntimeAdapter({
+      adapterType: "claude_local",
+      settings: sharedSettings,
+      companyId: companyB,
+      now,
+    })).toMatchObject({
+      sourceRuntime: "claude",
+      targetRuntime: "claude",
+      adapterType: "claude_local",
+      reason: null,
+      blocked: false,
+    });
+  });
+
+  it("preserves legacy top-level limit windows when no company context is supplied", () => {
     expect(resolveMasterRuntimeAdapter({
       adapterType: "claude_local",
       settings: settings({ claudeLimitedUntil: future }),
@@ -31,13 +108,21 @@ describe("master runtime failover", () => {
     });
   });
 
-  it("blocks instead of routing to non-master adapters when both masters are limited", () => {
+  it("blocks instead of routing to non-master adapters when both masters are limited for that company", () => {
     expect(resolveMasterRuntimeAdapter({
       adapterType: "codex_local",
       settings: settings({
-        claudeLimitedUntil: future,
-        codexLimitedUntil: future,
+        companyLimits: {
+          [companyA]: {
+            claudeLimitedUntil: future,
+            codexLimitedUntil: future,
+            activeRuntime: null,
+            reason: "codex_hard_limit",
+            updatedAt: now.toISOString(),
+          },
+        },
       }),
+      companyId: companyA,
       now,
     })).toMatchObject({
       sourceRuntime: "codex",
@@ -141,6 +226,35 @@ describe("master runtime failover", () => {
       activeRuntime: null,
       claudeLimitedUntil: null,
       codexLimitedUntil: null,
+    });
+  });
+
+  it("drops expired company-scoped limits so future runs switch back to their source runtime", () => {
+    const expired = "2026-06-05T20:00:00.000Z";
+    const limitedSettings = settings({
+      companyLimits: {
+        [companyA]: {
+          claudeLimitedUntil: expired,
+          codexLimitedUntil: null,
+          activeRuntime: "codex",
+          reason: "claude_hard_limit",
+          updatedAt: expired,
+        },
+      },
+    });
+
+    expect(normalizeMasterRuntimeFailoverSettings(limitedSettings, now)).not.toHaveProperty("companyLimits");
+    expect(resolveMasterRuntimeAdapter({
+      adapterType: "claude_local",
+      settings: limitedSettings,
+      companyId: companyA,
+      now,
+    })).toMatchObject({
+      sourceRuntime: "claude",
+      targetRuntime: "claude",
+      adapterType: "claude_local",
+      reason: null,
+      blocked: false,
     });
   });
 

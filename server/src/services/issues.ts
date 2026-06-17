@@ -773,6 +773,7 @@ async function listUnresolvedBlockerIssueIds(
     )
     .then((rows) => rows.map((row) => row.id));
 }
+
 async function getProjectDefaultGoalId(
   db: ProjectGoalReader,
   companyId: string,
@@ -1202,6 +1203,30 @@ function lowTrustBoundaryIssueCondition(
   }
   if (clauses.length === 0) return sql<boolean>`false`;
   return or(...clauses);
+}
+
+async function listDescendantIssueIds(
+  dbOrTx: any,
+  companyId: string,
+  rootIssueId: string,
+): Promise<string[]> {
+  const query = await dbOrTx.execute(sql`
+    WITH RECURSIVE descendants(id) AS (
+      SELECT ${issues.id}
+      FROM ${issues}
+      WHERE ${issues.companyId} = ${companyId}
+        AND ${issues.parentId} = ${rootIssueId}
+      UNION
+      SELECT ${issues.id}
+      FROM ${issues}
+      JOIN descendants ON ${issues.parentId} = descendants.id
+      WHERE ${issues.companyId} = ${companyId}
+    )
+    SELECT id FROM descendants
+  `);
+
+  const rows = query.rows as Array<{ id: string }>;
+  return rows.map((row) => row.id).filter((id) => id !== rootIssueId);
 }
 
 const BLOCKER_ATTENTION_OPEN_RECOVERY_TERMINAL_STATUSES = ["done", "cancelled"];
@@ -4448,6 +4473,57 @@ export function issueService(db: Db) {
         }));
     },
 
+    listWakeableBlockedIssues: async (
+      companyId: string,
+      opts: { limit?: number } = {},
+    ) => {
+      const limit = Math.max(1, Math.min(opts.limit ?? 50, 200));
+      const candidates = await db
+        .select({
+          id: issues.id,
+          assigneeAgentId: issues.assigneeAgentId,
+          description: issues.description,
+          updatedAt: issues.updatedAt,
+        })
+        .from(issues)
+        .where(
+          and(
+            eq(issues.companyId, companyId),
+            eq(issues.status, "blocked"),
+            isNull(issues.hiddenAt),
+            isNull(issues.assigneeUserId),
+            isNull(issues.monitorNextCheckAt),
+            sql`${issues.assigneeAgentId} is not null`,
+          ),
+        )
+        .orderBy(asc(issues.updatedAt), asc(issues.id))
+        .limit(limit);
+
+      const activeCandidates = candidates.filter((candidate) => {
+        if (!candidate.assigneeAgentId) return false;
+        return !externalWaitFromDescription(candidate.description);
+      });
+      if (activeCandidates.length === 0) return [];
+
+      const readinessMap = await listIssueDependencyReadinessMap(
+        db,
+        companyId,
+        activeCandidates.map((candidate) => candidate.id),
+      );
+
+      return activeCandidates
+        .map((candidate) => {
+          const readiness = readinessMap.get(candidate.id) ?? createIssueDependencyReadiness(candidate.id);
+          return { candidate, readiness };
+        })
+        .filter(({ readiness }) => readiness.isDependencyReady)
+        .map(({ candidate, readiness }) => ({
+          id: candidate.id,
+          assigneeAgentId: candidate.assigneeAgentId!,
+          blockerIssueIds: readiness.blockerIssueIds,
+        }));
+    },
+
     getWakeableParentAfterChildCompletion: async (parentIssueId: string) => {
       const parent = await db
         .select({
@@ -5205,6 +5281,7 @@ export function issueService(db: Db) {
       }
 
       applyStatusSideEffects(issueData.status, patch);
+      const shouldCancelSubtree = issueData.status === "cancelled" && existing.status !== "cancelled";
       if (issueData.status && issueData.status !== "done") {
         patch.completedAt = null;
       }
@@ -5355,6 +5432,31 @@ export function issueService(db: Db) {
             },
             tx,
           );
+        }
+        if (shouldCancelSubtree) {
+          const descendantIds = await listDescendantIssueIds(tx, existing.companyId, id);
+          if (descendantIds.length > 0) {
+            const now = patch.updatedAt ?? new Date();
+            await tx
+              .update(issues)
+              .set({
+                status: "cancelled",
+                cancelledAt: now,
+                completedAt: null,
+                checkoutRunId: null,
+                executionRunId: null,
+                executionAgentNameKey: null,
+                executionLockedAt: null,
+                updatedAt: now,
+              })
+              .where(
+                and(
+                  eq(issues.companyId, existing.companyId),
+                  inArray(issues.id, descendantIds),
+                  notInArray(issues.status, ["done", "cancelled"]),
+                ),
+              );
+          }
         }
         if (
           issueData.executionWorkspaceSettings !== undefined &&

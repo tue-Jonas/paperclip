@@ -544,7 +544,7 @@ describeEmbeddedPostgres("management routes", () => {
         livenessState: "failed",
         startedAt: new Date("2026-06-16T18:00:00.000Z"),
         finishedAt: new Date("2026-06-16T18:03:00.000Z"),
-        resultJson: { summary: "Failure was caused by missing credentials" },
+        resultJson: { summary: "Failure was caused by password: hunter2" },
         contextSnapshot: { issueId: issue.id },
       })
       .returning()
@@ -555,7 +555,7 @@ describeEmbeddedPostgres("management routes", () => {
       issueId: issue.id,
       authorType: "user",
       authorUserId: "board-user",
-      body: "Same-company board note with enough detail to remain fully visible to the analyzer caller.",
+      body: "Same-company board note: api key sk-live-example-secret must be rotated before the analyzer retries.",
       createdAt: new Date("2026-06-16T18:05:00.000Z"),
       updatedAt: new Date("2026-06-16T18:05:00.000Z"),
     });
@@ -590,11 +590,27 @@ describeEmbeddedPostgres("management routes", () => {
       source: "schedule",
       status: "failed",
       triggeredAt: new Date("2026-06-16T18:07:00.000Z"),
-      failureReason: "scheduler timeout with internal detail",
+      failureReason: "scheduler timeout after token=ghp_1234567890abcdefghijklmnopqrstuvwxyz was rejected",
       linkedIssueId: issue.id,
       createdAt: new Date("2026-06-16T18:07:00.000Z"),
       updatedAt: new Date("2026-06-16T18:07:00.000Z"),
     });
+    const approval = await db
+      .insert(approvals)
+      .values({
+        companyId: company.id,
+        type: "request_board_approval",
+        requestedByAgentId: agent.id,
+        requestedByUserId: "board-user",
+        status: "pending",
+        payload: {
+          title: "Approve recovery",
+          summary: "Use password: hunter2 for the one-time retry",
+          recommendedAction: "Rotate the secret first",
+        },
+      })
+      .returning()
+      .then((rows) => rows[0]!);
 
     const app = await createApp(db, {
       type: "agent",
@@ -613,8 +629,10 @@ describeEmbeddedPostgres("management routes", () => {
       grantId: null,
     });
     expect(analyzerRes.body.evidence.boardComments[0].bodyExcerpt).toContain(
-      "Same-company board note with enough detail",
+      "Same-company board note: api key",
     );
+    expect(analyzerRes.body.evidence.boardComments[0].bodyExcerpt).toContain("***REDACTED***");
+    expect(analyzerRes.body.evidence.boardComments[0].bodyExcerpt).not.toContain("sk-live-example-secret");
     expect(analyzerRes.body.evidence.boardActions).toEqual([
       expect.objectContaining({
         action: "issue.updated",
@@ -624,21 +642,51 @@ describeEmbeddedPostgres("management routes", () => {
     expect(analyzerRes.body.evidence.attentionRuns).toEqual([
       expect.objectContaining({
         runId: run.id,
-        resultSummary: expect.objectContaining({ summary: expect.any(String) }),
+        resultSummary: expect.objectContaining({ summary: "Failure was caused by password: ***REDACTED***" }),
       }),
     ]);
     expect(analyzerRes.body.evidence.routineRuns).toEqual([
       expect.objectContaining({
         routineId: routine.id,
-        failureReason: "scheduler timeout with internal detail",
+        failureReason: "scheduler timeout after token=***REDACTED*** was rejected",
       }),
     ]);
+    expect(analyzerRes.body.evidence.approvals).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        approvalId: approval.id,
+        payloadSummary: expect.objectContaining({
+          summary: "Use password: ***REDACTED*** for the one-time retry",
+        }),
+      }),
+    ]));
     expect(analyzerRes.body.evidence.blockedIssues).toEqual([
       expect.objectContaining({
         id: issue.id,
         title: "Investigate repeated failures",
       }),
     ]);
+
+    const detailRes = await request(app).get(`/api/management/companies/${company.id}`);
+    expect(detailRes.status, JSON.stringify(detailRes.body)).toBe(200);
+    expect(detailRes.body.approvals).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: approval.id,
+        payloadSummary: expect.objectContaining({
+          summary: "Use password: ***REDACTED*** for the one-time retry",
+        }),
+      }),
+    ]));
+
+    const runsRes = await request(app).get(`/api/management/companies/${company.id}/runs?activeOnly=`);
+    expect(runsRes.status, JSON.stringify(runsRes.body)).toBe(200);
+    expect(runsRes.body.runs).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: run.id,
+        resultSummary: expect.objectContaining({
+          summary: "Failure was caused by password: ***REDACTED***",
+        }),
+      }),
+    ]));
 
     const auditRows = await db
       .select({ id: activityLog.id })

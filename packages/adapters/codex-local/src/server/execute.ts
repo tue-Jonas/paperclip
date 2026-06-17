@@ -42,6 +42,7 @@ import {
 import {
   parseCodexJsonl,
   extractCodexRetryNotBefore,
+  isCodexModelSwitchLimitError,
   isCodexTransientUpstreamError,
   isCodexUnknownSessionError,
 } from "./parse.js";
@@ -49,7 +50,11 @@ import { pathExists, prepareManagedCodexHome, resolveManagedCodexHomeDir, resolv
 import { prepareCodexRuntimeConfig } from "./runtime-config.js";
 import { resolveCodexDesiredSkillNames } from "./skills.js";
 import { buildCodexExecArgs } from "./codex-args.js";
-import { normalizeCodexLocalModel, SANDBOX_INSTALL_COMMAND } from "../index.js";
+import {
+  codexLocalModelFallbacksAfterLimit,
+  normalizeCodexLocalModel,
+  SANDBOX_INSTALL_COMMAND,
+} from "../index.js";
 
 const __moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const CODEX_ROLLOUT_NOISE_RE =
@@ -711,9 +716,12 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       heartbeatPromptChars: renderedPrompt.length,
     };
 
-    const runAttempt = async (resumeSessionId: string | null) => {
+    const runAttempt = async (resumeSessionId: string | null, modelOverride: string | null = null) => {
+      const attemptConfig = modelOverride
+        ? { ...normalizedConfig, model: modelOverride }
+        : normalizedConfig;
       const execArgs = buildCodexExecArgs(
-        forceSaferInvocation ? { ...normalizedConfig, fastMode: false } : normalizedConfig,
+        forceSaferInvocation ? { ...attemptConfig, fastMode: false } : attemptConfig,
         {
           resumeSessionId,
           skipGitRepoCheck: executionTargetIsSandbox || executionTargetIsLocalHeadless,
@@ -764,13 +772,14 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
           ...proc,
           stderr: cleanedStderr,
         },
+        model: execArgs.model,
         rawStderr: proc.stderr,
         parsed: parseCodexJsonl(proc.stdout),
       };
     };
 
     const toResult = (
-      attempt: { proc: { exitCode: number | null; signal: string | null; timedOut: boolean; stdout: string; stderr: string }; rawStderr: string; parsed: ReturnType<typeof parseCodexJsonl> },
+      attempt: { proc: { exitCode: number | null; signal: string | null; timedOut: boolean; stdout: string; stderr: string }; model: string; rawStderr: string; parsed: ReturnType<typeof parseCodexJsonl> },
       clearSessionOnMissingSession = false,
       isRetry = false,
     ): AdapterExecutionResult => {
@@ -844,7 +853,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         sessionDisplayId: resolvedSessionId,
         provider: "openai",
         biller: resolveCodexBiller(effectiveEnv, billingType),
-        model,
+        model: attempt.model || model,
         billingType,
         costUsd: null,
         resultJson: {
@@ -873,6 +882,35 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         );
         const retry = await runAttempt(null);
         return toResult(retry, true, true);
+      }
+
+      if (
+        !initial.proc.timedOut &&
+        (initial.proc.exitCode ?? 0) !== 0 &&
+        isCodexModelSwitchLimitError({
+          stdout: initial.proc.stdout,
+          stderr: initial.proc.stderr,
+          errorMessage: initial.parsed.errorMessage,
+        })
+      ) {
+        const fallbackModels = codexLocalModelFallbacksAfterLimit(initial.model || model);
+        for (const fallbackModel of fallbackModels) {
+          await onLog(
+            "stdout",
+            `[paperclip] Codex model "${initial.model || model || "(default)"}" hit a switchable usage limit; retrying with "${fallbackModel}".\n`,
+          );
+          const retry = await runAttempt(sessionId, fallbackModel);
+          if ((retry.proc.exitCode ?? 0) === 0) {
+            return toResult(retry, false, true);
+          }
+          if (!isCodexModelSwitchLimitError({
+            stdout: retry.proc.stdout,
+            stderr: retry.proc.stderr,
+            errorMessage: retry.parsed.errorMessage,
+          })) {
+            return toResult(retry, false, true);
+          }
+        }
       }
 
       return toResult(initial, false, false);

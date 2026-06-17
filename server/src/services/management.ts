@@ -40,6 +40,7 @@ import type {
   ManagementRunSummary,
 } from "@paperclipai/shared";
 import { summarizeHeartbeatRunResultJson } from "./heartbeat-run-summary.js";
+import { redactSensitiveExcerpt, redactSensitiveText, sanitizeDisplayRecord } from "../redaction.js";
 
 const ACTIVE_RUN_STATUSES = ["queued", "scheduled_retry", "running"] as const;
 const TERMINAL_ISSUE_STATUSES = new Set(["done", "cancelled"]);
@@ -109,12 +110,6 @@ function asDate(value: Date | string | null | undefined) {
   return value instanceof Date ? value : new Date(value);
 }
 
-function truncateExcerpt(text: string | null | undefined, max: number) {
-  const normalized = (text ?? "").replace(/\s+/g, " ").trim();
-  if (!normalized) return null;
-  return normalized.length <= max ? normalized : `${normalized.slice(0, max - 1)}...`;
-}
-
 function redactAnalyzerBlockedIssue(issue: ManagementIssueSummary): ManagementIssueSummary {
   return {
     ...issue,
@@ -165,7 +160,7 @@ function routineRunsApiPath(routineId: string) {
 }
 
 function summarizeApprovalPayloadForAnalyzer(payload: Record<string, unknown> | null | undefined) {
-  return summarizeApprovalPayload(payload);
+  return sanitizeDisplayRecord(summarizeApprovalPayload(payload));
 }
 
 function summarizeActivityDetails(details: Record<string, unknown> | null | undefined) {
@@ -203,7 +198,7 @@ function summarizeActivityDetails(details: Record<string, unknown> | null | unde
       summary.previous = previousSummary;
     }
   }
-  return Object.keys(summary).length > 0 ? summary : null;
+  return sanitizeDisplayRecord(Object.keys(summary).length > 0 ? summary : null);
 }
 
 function toCompanyHealth(summary: ManagementCompanySummary): ManagementCompanyHealthSummary {
@@ -620,7 +615,7 @@ export function managementService(db: Db) {
       issueTitle: row.issueTitle,
       createdAt: row.createdAt,
       authorUserId: row.authorUserId,
-      bodyExcerpt: truncateExcerpt(row.body, includePrivateEvidence ? 280 : 140),
+      bodyExcerpt: redactSensitiveExcerpt(row.body, includePrivateEvidence ? 280 : 140),
       issueApiPath: issueApiPath(row.issueId),
       commentApiPath: commentApiPath(row.issueId, row.commentId),
       issueAppPath: issueAppPath(row.issueIdentifier),
@@ -698,7 +693,7 @@ export function managementService(db: Db) {
         issueId: linkedIssueId,
         issueIdentifier: linkedIssue?.identifier ?? null,
         issueTitle: linkedIssue?.title ?? null,
-        resultSummary: includePrivateEvidence ? summarizeHeartbeatRunResultJson(row.resultJson) : null,
+        resultSummary: includePrivateEvidence ? sanitizeDisplayRecord(summarizeHeartbeatRunResultJson(row.resultJson)) : null,
         runIssuesApiPath: runIssuesApiPath(row.runId),
         issueApiPath: linkedIssueId ? issueApiPath(linkedIssueId) : null,
         issueAppPath: issueAppPath(linkedIssue?.identifier ?? null),
@@ -712,7 +707,7 @@ export function managementService(db: Db) {
       status: row.status,
       source: row.source,
       triggeredAt: row.triggeredAt,
-      failureReason: includePrivateEvidence ? row.failureReason : null,
+      failureReason: includePrivateEvidence && row.failureReason ? redactSensitiveText(row.failureReason) : null,
       linkedIssueId: row.linkedIssueId,
       linkedIssueIdentifier: row.linkedIssueIdentifier,
       linkedIssueTitle: row.linkedIssueTitle,
@@ -878,7 +873,7 @@ export function managementService(db: Db) {
       decidedAt: row.decidedAt,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
-      payloadSummary: summarizeApprovalPayload(row.payload),
+      payloadSummary: sanitizeDisplayRecord(summarizeApprovalPayload(row.payload)),
     }));
 
     return {
@@ -1093,7 +1088,7 @@ export function managementService(db: Db) {
           issueIdentifier: issue?.identifier ?? null,
           issueTitle: issue?.title ?? null,
           errorCode: row.errorCode,
-          resultSummary: summarizeHeartbeatRunResultJson(row.resultJson),
+          resultSummary: sanitizeDisplayRecord(summarizeHeartbeatRunResultJson(row.resultJson)),
         };
       }),
       nextOffset: hasMore ? query.offset + query.limit : null,
