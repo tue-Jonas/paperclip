@@ -92,7 +92,7 @@ describe("master runtime failover", () => {
     });
   });
 
-  it("detects hard usage limits even without transient_upstream classification", () => {
+  it("detects whole-runtime hard usage limits even without transient_upstream classification", () => {
     expect(isHardMasterRuntimeLimitResult("claude_local", {
       exitCode: 1,
       signal: null,
@@ -101,16 +101,18 @@ describe("master runtime failover", () => {
       errorMessage: "Claude usage limit reached. Resets at 3:15 AM (UTC).",
       errorFamily: null,
     })).toBe(true);
+  });
 
+  it("does not mark Codex model-scoped usage limits as whole-runtime hard limits", () => {
     expect(isHardMasterRuntimeLimitResult("codex_local", {
       exitCode: 1,
       signal: null,
       timedOut: false,
       errorCode: "codex_transient_upstream",
-      errorMessage: "You've hit your usage limit for GPT-5. Switch to another model now, or try again at 11:31 PM.",
+      errorMessage: "You've hit your usage limit for GPT-5.3-Codex-Spark. Switch to another model now, or try again at 11:31 PM.",
       retryNotBefore: "2026-06-06T03:31:00.000Z",
       errorFamily: null,
-    })).toBe(true);
+    })).toBe(false);
   });
 
   it("does not classify ordinary non-master or generic failures as hard master limits", () => {

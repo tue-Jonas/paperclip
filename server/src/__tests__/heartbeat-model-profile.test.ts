@@ -103,6 +103,66 @@ describe("heartbeat model profile application", () => {
     });
   });
 
+  it("does not apply source-adapter runtime profile config during master-runtime failover", async () => {
+    const modelProfile = resolveModelProfileApplication({
+      adapterModelProfiles: await listAdapterModelProfiles("codex_local"),
+      agentRuntimeConfig: {
+        modelProfiles: {
+          cheap: {
+            adapterConfig: {
+              model: "claude-haiku-4-5-20251001",
+              effort: "low",
+            },
+          },
+        },
+      },
+      issueModelProfile: null,
+      contextSnapshot: { modelProfile: "cheap" },
+      sourceAdapterType: "claude_local",
+      targetAdapterType: "codex_local",
+    });
+
+    expect(modelProfile).toMatchObject({
+      requested: "cheap",
+      requestedBy: "wake_context",
+      applied: "cheap",
+      configSource: "adapter_default",
+      adapterConfig: {
+        model: "gpt-5.3-codex-spark",
+        modelReasoningEffort: "high",
+      },
+    });
+    expect(modelProfile.adapterConfig).not.toHaveProperty("effort");
+  });
+
+  it("strips source-adapter issue config overrides during master-runtime failover", () => {
+    const modelProfile = resolveModelProfileApplication({
+      adapterModelProfiles: [cheapProfile],
+      agentRuntimeConfig: {},
+      issueModelProfile: null,
+      contextSnapshot: {},
+    });
+
+    const merged = mergeModelProfileAdapterConfig({
+      baseConfig: {
+        promptTemplate: "Run the task",
+      },
+      modelProfile,
+      issueAdapterConfig: {
+        model: "claude-opus-4-8",
+        promptTemplate: "Issue prompt",
+        timeoutSec: 60,
+      },
+      sourceAdapterType: "claude_local",
+      targetAdapterType: "codex_local",
+    });
+
+    expect(merged).toEqual({
+      promptTemplate: "Issue prompt",
+      timeoutSec: 60,
+    });
+  });
+
   it("falls back to the primary config when the adapter does not support the requested profile", () => {
     const modelProfile = resolveModelProfileApplication({
       adapterModelProfiles: [],

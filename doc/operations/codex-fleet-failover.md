@@ -106,3 +106,13 @@ pnpm paperclipai runtime force-claude --clear-limits
   `claude_local` fails over to `codex_local` when Claude is limited, and vice
   versa. If both master runtimes are marked limited, Paperclip blocks the issue
   with `master_runtime_all_limited`.
+- Cross-runtime failover carries only shared execution config (`cwd`,
+  `instructionsFilePath`, `promptTemplate`, `env`, workspace settings, and
+  timeout/grace fields). Adapter-specific model/profile settings from the
+  source runtime must not be sent to the execution runtime. For example, a
+  Claude cheap profile using `claude-haiku-*` must not become a Codex `--model`
+  value during Claude -> Codex failover.
+- Codex usage-limit messages that explicitly say "switch to another model" are
+  model-scoped limits. They should fail that run/profile, but they must not mark
+  the whole Codex master runtime limited while another Codex model, such as the
+  default account model, still works.

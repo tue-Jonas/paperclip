@@ -1511,6 +1511,8 @@ const MASTER_RUNTIME_LIMIT_DEFAULT_MS = 6 * 60 * 60 * 1000;
 const MASTER_RUNTIME_FAILOVER_RETRY_MAX_ATTEMPTS = 1;
 const MASTER_RUNTIME_HARD_LIMIT_RE =
   /(?:usage\s+limit|usage\s+cap|weekly\s+limit|5[-\s]?hour\s+limit|out\s+of\s+extra\s+usage|hit\s+your\s+usage\s+limit|try\s+again\s+at)/i;
+const MASTER_RUNTIME_MODEL_SCOPED_LIMIT_RE =
+  /you(?:'|’)ve hit your usage limit for .+\.\s+switch to another model now,\s+or try again at/i;
 const MASTER_RUNTIME_SHARED_CONFIG_KEYS = [
   "cwd",
   "instructionsFilePath",
@@ -1669,12 +1671,15 @@ export function coerceMasterRuntimeFallbackConfig(input: {
 
 export function isHardMasterRuntimeLimitResult(adapterType: string, result: AdapterExecutionResult) {
   if (!masterRuntimeForAdapter(adapterType)) return false;
-  if (readNonEmptyString(result.retryNotBefore)) return true;
   const haystack = [
     result.errorMessage ?? "",
     readNonEmptyString(result.errorCode) ?? "",
     JSON.stringify(parseObject(result.resultJson)),
   ].join("\n");
+  if (adapterType === MASTER_RUNTIME_ADAPTERS.codex && MASTER_RUNTIME_MODEL_SCOPED_LIMIT_RE.test(haystack)) {
+    return false;
+  }
+  if (readNonEmptyString(result.retryNotBefore)) return true;
   return MASTER_RUNTIME_HARD_LIMIT_RE.test(haystack);
 }
 
@@ -1733,6 +1738,8 @@ export function resolveModelProfileApplication(input: {
   issueModelProfile: ModelProfileKey | null | undefined;
   contextSnapshot: Record<string, unknown> | null | undefined;
   profileResolutionFallbackReason?: string | null;
+  sourceAdapterType?: string | null;
+  targetAdapterType?: string | null;
 }): ModelProfileApplication {
   const issueModelProfile = input.issueModelProfile ?? null;
   const contextModelProfile = readContextModelProfile(input.contextSnapshot);
@@ -1777,16 +1784,23 @@ export function resolveModelProfileApplication(input: {
       adapterConfig: null,
     };
   }
+  const sourceAdapterType = readNonEmptyString(input.sourceAdapterType);
+  const targetAdapterType = readNonEmptyString(input.targetAdapterType);
+  const canApplyRuntimeProfileConfig =
+    !sourceAdapterType || !targetAdapterType || sourceAdapterType === targetAdapterType;
+  const runtimeProfileAdapterConfig = canApplyRuntimeProfileConfig
+    ? runtimeProfile.adapterConfig
+    : {};
 
   return {
     requested,
     requestedBy,
     applied: requested,
-    configSource: runtimeProfile.configured ? "agent_runtime" : "adapter_default",
+    configSource: runtimeProfile.configured && canApplyRuntimeProfileConfig ? "agent_runtime" : "adapter_default",
     fallbackReason: null,
     adapterConfig: {
       ...parseObject(adapterProfile.adapterConfig),
-      ...runtimeProfile.adapterConfig,
+      ...runtimeProfileAdapterConfig,
     },
   };
 }
@@ -1795,11 +1809,23 @@ export function mergeModelProfileAdapterConfig(input: {
   baseConfig: Record<string, unknown>;
   modelProfile: ModelProfileApplication;
   issueAdapterConfig: Record<string, unknown> | null | undefined;
+  sourceAdapterType?: string | null;
+  targetAdapterType?: string | null;
 }): Record<string, unknown> {
+  const sourceAdapterType = readNonEmptyString(input.sourceAdapterType);
+  const targetAdapterType = readNonEmptyString(input.targetAdapterType);
+  const issueAdapterConfig =
+    sourceAdapterType && targetAdapterType
+      ? coerceMasterRuntimeFallbackConfig({
+          config: input.issueAdapterConfig ?? {},
+          sourceAdapterType,
+          targetAdapterType,
+        })
+      : (input.issueAdapterConfig ?? {});
   return {
     ...input.baseConfig,
     ...(input.modelProfile.adapterConfig ?? {}),
-    ...(input.issueAdapterConfig ?? {}),
+    ...issueAdapterConfig,
   };
 }
 
@@ -8937,6 +8963,8 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       issueModelProfile: issueAssigneeOverrides?.modelProfile ?? null,
       contextSnapshot: context,
       profileResolutionFallbackReason,
+      sourceAdapterType,
+      targetAdapterType: executionAdapterType,
     });
     const modelProfileMetadata = modelProfileRunMetadata(modelProfileApplication);
     if (modelProfileMetadata) {
@@ -8949,6 +8977,8 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       baseConfig: persistedWorkspaceManagedConfig,
       modelProfile: modelProfileApplication,
       issueAdapterConfig: issueAssigneeOverrides?.adapterConfig ?? null,
+      sourceAdapterType,
+      targetAdapterType: executionAdapterType,
     });
     const configSnapshot = buildExecutionWorkspaceConfigSnapshot(mergedConfig, selectedEnvironmentId);
     const executionRunConfig = stripWorkspaceRuntimeFromExecutionRunConfig(mergedConfig);
