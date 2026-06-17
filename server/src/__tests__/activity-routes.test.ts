@@ -162,6 +162,37 @@ describe.sequential("activity routes", () => {
     expect(res.body[0].details.bodySnippet).toBe("Board note password: ***REDACTED***");
   });
 
+  it("redacts credential-like activity snippets before create persistence and response", async () => {
+    mockActivityService.create.mockImplementation(async (input) => ({
+      id: "activity-1",
+      createdAt: "2026-06-17T00:00:00.000Z",
+      ...input,
+    }));
+
+    const app = await createApp();
+    const res = await requestApp(app, (baseUrl) => request(baseUrl)
+      .post("/api/companies/company-1/activity")
+      .send({
+        actorType: "user",
+        actorId: "user-1",
+        action: "issue.comment_added",
+        entityType: "issue",
+        entityId: "issue-1",
+        details: {
+          bodySnippet: "Board note password: hunter2",
+        },
+      }));
+
+    expect(res.status).toBe(201);
+    expect(mockActivityService.create).toHaveBeenCalledWith(expect.objectContaining({
+      companyId: "company-1",
+      details: {
+        bodySnippet: "Board note password: ***REDACTED***",
+      },
+    }));
+    expect(res.body.details.bodySnippet).toBe("Board note password: ***REDACTED***");
+  });
+
   it("resolves alphanumeric issue identifiers before loading runs", async () => {
     mockIssueService.getByIdentifier.mockResolvedValue({
       id: "issue-uuid-1",
