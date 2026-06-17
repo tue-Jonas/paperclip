@@ -1,6 +1,8 @@
 import { z } from "zod";
 import {
   AGENT_ADAPTER_TYPES,
+  CROSS_COMPANY_AGENT_GRANT_CAPABILITIES,
+  CROSS_COMPANY_AGENT_GRANT_STATUSES,
   HUMAN_COMPANY_MEMBERSHIP_ROLES,
   INVITE_JOIN_TYPES,
   JOIN_REQUEST_STATUSES,
@@ -150,6 +152,42 @@ export const updateUserCompanyAccessSchema = z.object({
 });
 
 export type UpdateUserCompanyAccess = z.infer<typeof updateUserCompanyAccessSchema>;
+
+export const crossCompanyAgentGrantCapabilitySchema = z.enum(CROSS_COMPANY_AGENT_GRANT_CAPABILITIES);
+export type CrossCompanyAgentGrantCapabilityInput = z.infer<typeof crossCompanyAgentGrantCapabilitySchema>;
+
+export const crossCompanyAgentGrantStatusSchema = z.enum(CROSS_COMPANY_AGENT_GRANT_STATUSES);
+export type CrossCompanyAgentGrantStatusInput = z.infer<typeof crossCompanyAgentGrantStatusSchema>;
+
+export const createCrossCompanyAgentGrantSchema = z.object({
+  sourceCompanyId: z.string().uuid(),
+  principalId: z.string().uuid(),
+  targetCompanyId: z.string().uuid(),
+  capability: crossCompanyAgentGrantCapabilitySchema.default("read"),
+}).refine((value) => value.sourceCompanyId !== value.targetCompanyId, {
+  message: "sourceCompanyId and targetCompanyId must differ",
+  path: ["targetCompanyId"],
+});
+
+export type CreateCrossCompanyAgentGrant = z.infer<typeof createCrossCompanyAgentGrantSchema>;
+
+export const listCrossCompanyAgentGrantsQuerySchema = z.object({
+  sourceCompanyId: z.string().uuid().optional(),
+  targetCompanyId: z.string().uuid().optional(),
+  principalId: z.string().uuid().optional(),
+  capability: crossCompanyAgentGrantCapabilitySchema.optional(),
+  status: crossCompanyAgentGrantStatusSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+  offset: z.coerce.number().int().min(0).optional().default(0),
+});
+
+export type ListCrossCompanyAgentGrantsQuery = z.infer<typeof listCrossCompanyAgentGrantsQuerySchema>;
+
+export const revokeCrossCompanyAgentGrantSchema = z.object({
+  grantId: z.string().uuid(),
+});
+
+export type RevokeCrossCompanyAgentGrant = z.infer<typeof revokeCrossCompanyAgentGrantSchema>;
 
 export const searchAdminUsersQuerySchema = z.object({
   query: z.string().trim().max(120).optional().default(""),

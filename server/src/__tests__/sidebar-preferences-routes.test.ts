@@ -116,6 +116,20 @@ describe("sidebar preference routes", () => {
     expect(mockSidebarPreferenceService.getProjectOrder).toHaveBeenCalledWith("company-1", "user-1");
   });
 
+  it("allows local trusted instance admins to read company-scoped preferences without memberships", async () => {
+    const app = await createApp({
+      type: "board",
+      userId: "local-admin",
+      source: "local_implicit",
+      isInstanceAdmin: true,
+    });
+
+    const res = await request(app).get("/api/companies/company-1/sidebar-preferences/me");
+
+    expect(res.status).toBe(200);
+    expect(mockSidebarPreferenceService.getProjectOrder).toHaveBeenCalledWith("company-1", "local-admin");
+  });
+
   it("logs project order updates for company-scoped writes", async () => {
     const app = await createApp({
       type: "board",

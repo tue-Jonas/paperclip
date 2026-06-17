@@ -28,6 +28,14 @@ export {
   type UpdateCompanyBranding,
 } from "./company.js";
 export {
+  managementAnalyzerSnapshotQuerySchema,
+  managementIssueListQuerySchema,
+  managementRunListQuerySchema,
+  type ManagementAnalyzerSnapshotQuery,
+  type ManagementIssueListQuery,
+  type ManagementRunListQuery,
+} from "./management.js";
+export {
   environmentDriverSchema,
   environmentStatusSchema,
   environmentLeaseStatusSchema,
@@ -502,6 +510,11 @@ export {
   updateCompanyMemberWithPermissionsSchema,
   archiveCompanyMemberSchema,
   updateMemberPermissionsSchema,
+  crossCompanyAgentGrantCapabilitySchema,
+  crossCompanyAgentGrantStatusSchema,
+  createCrossCompanyAgentGrantSchema,
+  listCrossCompanyAgentGrantsQuerySchema,
+  revokeCrossCompanyAgentGrantSchema,
   searchAdminUsersQuerySchema,
   updateUserCompanyAccessSchema,
   type CreateCompanyInvite,
@@ -521,6 +534,11 @@ export {
   type UpdateCompanyMemberWithPermissions,
   type ArchiveCompanyMember,
   type UpdateMemberPermissions,
+  type CrossCompanyAgentGrantCapabilityInput,
+  type CrossCompanyAgentGrantStatusInput,
+  type CreateCrossCompanyAgentGrant,
+  type ListCrossCompanyAgentGrantsQuery,
+  type RevokeCrossCompanyAgentGrant,
   type SearchAdminUsersQuery,
   type UpdateUserCompanyAccess,
 } from "./access.js";

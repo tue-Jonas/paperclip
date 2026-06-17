@@ -65,7 +65,8 @@ export function normalizeRememberedInstanceSettingsPath(rawPath: string | null):
     suffix === "/heartbeats" ||
     suffix === "/plugins" ||
     suffix === "/experimental" ||
-    suffix === "/adapters"
+    suffix === "/adapters" ||
+    suffix === "/cross-org"
   ) {
     return `${INSTANCE_SETTINGS_PATH_PREFIX}${suffix}${search}${hash}`;
   }

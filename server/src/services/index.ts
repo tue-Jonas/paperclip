@@ -42,11 +42,18 @@ export {
 } from "./productivity-review.js";
 export { classifyIssueGraphLiveness, type IssueLivenessFinding } from "./recovery/index.js";
 export { dashboardService } from "./dashboard.js";
+export { managementService } from "./management.js";
 export { sidebarBadgeService } from "./sidebar-badges.js";
 export { sidebarPreferenceService } from "./sidebar-preferences.js";
 export { resourceMembershipService, type ResourceMembershipPolicyHook } from "./resource-memberships.js";
 export { inboxDismissalService } from "./inbox-dismissals.js";
 export { accessService } from "./access.js";
+export {
+  CROSS_COMPANY_AGENT_SOURCE_COMPANY_IDS_ENV_VAR,
+  crossCompanyAgentGrantService,
+  isAllowedCrossCompanyAgentSourceCompany,
+  listAllowedCrossCompanyAgentSourceCompanyIds,
+} from "./cross-company-agent-grants.js";
 export {
   backfillPrincipalAccessCompatibility,
   ensureHumanRoleDefaultGrants,

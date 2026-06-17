@@ -3,13 +3,18 @@ import type { Db } from "@paperclipai/db";
 import {
   agents,
   companyMemberships,
+  crossCompanyAgentGrants,
   heartbeatRuns,
   instanceUserRoles,
   issues,
   principalPermissionGrants,
   projects,
 } from "@paperclipai/db";
-import type { PermissionKey, PrincipalType } from "@paperclipai/shared";
+import type {
+  CrossCompanyAgentGrantCapability,
+  PermissionKey,
+  PrincipalType,
+} from "@paperclipai/shared";
 import { LOW_TRUST_REVIEW_PRESET, type LowTrustBoundary } from "@paperclipai/shared";
 import {
   LOW_TRUST_ISSUE_ANCESTRY_MAX_DEPTH,
@@ -17,6 +22,7 @@ import {
   resolveCoreTrustPreset,
   type TrustPresetResolution,
 } from "./trust-preset-resolver.js";
+import { isAllowedCrossCompanyAgentSourceCompany } from "./cross-company-agent-grants.js";
 
 export type AuthorizationActor =
   {
@@ -75,6 +81,7 @@ export type AuthorizationDecision = {
     | "allow_local_board"
     | "allow_instance_admin"
     | "allow_explicit_grant"
+    | "allow_cross_company_grant"
     | "allow_legacy_agent_creator"
     | "allow_self"
     | "allow_company_agent"
@@ -95,6 +102,13 @@ export type AuthorizationDecision = {
     principalId: string;
     permissionKey: PermissionKey;
     scope: Record<string, unknown> | null;
+  };
+  crossCompanyGrant?: {
+    id: string;
+    sourceCompanyId: string;
+    principalId: string;
+    targetCompanyId: string;
+    capability: CrossCompanyAgentGrantCapability;
   };
 };
 
@@ -133,6 +147,13 @@ function permissionForAction(action: AuthorizationAction): PermissionKey | null 
  * are deliberately excluded and keep requiring instance-admin / grants.
  */
 const MEMBER_READABLE_ACTIONS = new Set<AuthorizationAction>([
+  "agent:read",
+  "issue:read",
+  "project:read",
+  "company_scope:read",
+]);
+
+const CROSS_COMPANY_AGENT_READ_ACTIONS = new Set<AuthorizationAction>([
   "agent:read",
   "issue:read",
   "project:read",
@@ -463,6 +484,28 @@ export function authorizationService(db: Db) {
           eq(principalPermissionGrants.principalType, principalType),
           eq(principalPermissionGrants.principalId, principalId),
           eq(principalPermissionGrants.permissionKey, permissionKey),
+        ),
+      )
+      .then((rows) => rows[0] ?? null);
+  }
+
+  async function findActiveCrossCompanyGrant(
+    sourceCompanyId: string,
+    principalId: string,
+    targetCompanyId: string,
+    capability: CrossCompanyAgentGrantCapability,
+  ) {
+    return db
+      .select()
+      .from(crossCompanyAgentGrants)
+      .where(
+        and(
+          eq(crossCompanyAgentGrants.sourceCompanyId, sourceCompanyId),
+          eq(crossCompanyAgentGrants.principalType, "agent"),
+          eq(crossCompanyAgentGrants.principalId, principalId),
+          eq(crossCompanyAgentGrants.targetCompanyId, targetCompanyId),
+          eq(crossCompanyAgentGrants.capability, capability),
+          eq(crossCompanyAgentGrants.status, "active"),
         ),
       )
       .then((rows) => rows[0] ?? null);
@@ -1090,20 +1133,83 @@ export function authorizationService(db: Db) {
         explanation: "Agent authentication required.",
       });
     }
-    if (input.actor.companyId !== companyId) {
+
+    const actorCompanyId = input.actor.companyId ?? null;
+    if (!actorCompanyId) {
       return deny({
         action: input.action,
-        reason: "deny_company_boundary",
-        explanation: "Agent key cannot access another company.",
+        reason: "deny_unauthenticated",
+        explanation: "Agent company context is required.",
       });
     }
 
     const actorAgent = await loadAgent(actorAgentId);
-    if (!actorAgent || actorAgent.companyId !== companyId) {
+    if (!actorAgent || actorAgent.companyId !== actorCompanyId) {
       return deny({
         action: input.action,
         reason: "deny_company_boundary",
-        explanation: "Actor agent was not found in the target company.",
+        explanation: "Actor agent was not found in the source company.",
+      });
+    }
+
+    if (actorCompanyId !== companyId) {
+      if (!CROSS_COMPANY_AGENT_READ_ACTIONS.has(input.action)) {
+        return deny({
+          action: input.action,
+          reason: "deny_company_boundary",
+          explanation: "Agent key cannot access another company.",
+        });
+      }
+      if (!isAllowedCrossCompanyAgentSourceCompany(actorCompanyId)) {
+        return deny({
+          action: input.action,
+          reason: "deny_company_boundary",
+          explanation: "Only configured source-company agents can use cross-company read delegation.",
+        });
+      }
+
+      const sourceTrust = await resolveActorTrust({
+        actorAgent,
+        actor: input.actor,
+        companyId: actorCompanyId,
+        resource: { type: "company", companyId: actorCompanyId },
+      });
+      if (sourceTrust.kind !== "standard") {
+        return deny({
+          action: input.action,
+          reason: "deny_policy_restricted",
+          explanation:
+            sourceTrust.kind === "denied"
+              ? sourceTrust.detail
+              : `${LOW_TRUST_REVIEW_PRESET} agents cannot use cross-company read delegation.`,
+        });
+      }
+
+      const crossCompanyGrant = await findActiveCrossCompanyGrant(
+        actorCompanyId,
+        actorAgentId,
+        companyId,
+        "read",
+      );
+      if (!crossCompanyGrant) {
+        return deny({
+          action: input.action,
+          reason: "deny_missing_grant",
+          explanation: "Missing active cross-company read grant for the target company.",
+        });
+      }
+
+      return allow({
+        action: input.action,
+        reason: "allow_cross_company_grant",
+        explanation: "Allowed by active cross-company read grant.",
+        crossCompanyGrant: {
+          id: crossCompanyGrant.id,
+          sourceCompanyId: crossCompanyGrant.sourceCompanyId,
+          principalId: crossCompanyGrant.principalId,
+          targetCompanyId: crossCompanyGrant.targetCompanyId,
+          capability: crossCompanyGrant.capability as CrossCompanyAgentGrantCapability,
+        },
       });
     }
 
@@ -1114,7 +1220,7 @@ export function authorizationService(db: Db) {
       resolution: await resolveActorTrust({
         actorAgent,
         actor: input.actor,
-        companyId,
+        companyId: actorCompanyId,
         resource: input.resource,
       }),
     });

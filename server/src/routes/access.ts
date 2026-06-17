@@ -34,9 +34,12 @@ import {
   claimJoinRequestApiKeySchema,
   createBoardApiKeySchema,
   createCompanyInviteSchema,
+  createCrossCompanyAgentGrantSchema,
   createOpenClawInvitePromptSchema,
   listCompanyInvitesQuerySchema,
+  listCrossCompanyAgentGrantsQuerySchema,
   listJoinRequestsQuerySchema,
+  revokeCrossCompanyAgentGrantSchema,
   resolveCliAuthChallengeSchema,
   searchAdminUsersQuerySchema,
   updateCompanyMemberWithPermissionsSchema,
@@ -62,6 +65,7 @@ import {
   accessService,
   agentService,
   boardAuthService,
+  crossCompanyAgentGrantService,
   deduplicateAgentName,
   logActivity,
   notifyHireApproved
@@ -4516,6 +4520,93 @@ export function accessRoutes(
       );
       if (!member) throw notFound("Member not found");
       res.json(member);
+    }
+  );
+
+  router.get("/admin/cross-company-agent-grants", async (req, res) => {
+    await assertInstanceAdmin(req);
+    const query = listCrossCompanyAgentGrantsQuerySchema.parse(req.query);
+    res.json(await crossCompanyAgentGrantService(db).list(query));
+  });
+
+  router.post(
+    "/admin/cross-company-agent-grants",
+    validate(createCrossCompanyAgentGrantSchema),
+    async (req, res) => {
+      await assertInstanceAdmin(req);
+      const grant = await crossCompanyAgentGrantService(db).upsert({
+        ...req.body,
+        createdByUserId: req.actor.userId ?? null,
+      });
+
+      const details = {
+        sourceCompanyId: grant.sourceCompanyId,
+        principalType: grant.principalType,
+        principalId: grant.principalId,
+        targetCompanyId: grant.targetCompanyId,
+        capability: grant.capability,
+      };
+      await logActivity(db, {
+        companyId: grant.sourceCompanyId,
+        actorType: "user",
+        actorId: req.actor.userId ?? "board",
+        action: "cross_company_agent_grant.created",
+        entityType: "cross_company_agent_grant",
+        entityId: grant.id,
+        details,
+      });
+      await logActivity(db, {
+        companyId: grant.targetCompanyId,
+        actorType: "user",
+        actorId: req.actor.userId ?? "board",
+        action: "cross_company_agent_grant.created",
+        entityType: "cross_company_agent_grant",
+        entityId: grant.id,
+        details,
+      });
+
+      res.status(201).json(grant);
+    }
+  );
+
+  router.post(
+    "/admin/cross-company-agent-grants/revoke",
+    validate(revokeCrossCompanyAgentGrantSchema),
+    async (req, res) => {
+      await assertInstanceAdmin(req);
+      const grant = await crossCompanyAgentGrantService(db).revoke(
+        req.body.grantId,
+        req.actor.userId ?? null,
+      );
+      if (!grant) throw notFound("Cross-company agent grant not found");
+
+      const details = {
+        sourceCompanyId: grant.sourceCompanyId,
+        principalType: grant.principalType,
+        principalId: grant.principalId,
+        targetCompanyId: grant.targetCompanyId,
+        capability: grant.capability,
+      };
+      await logActivity(db, {
+        companyId: grant.sourceCompanyId,
+        actorType: "user",
+        actorId: req.actor.userId ?? "board",
+        action: "cross_company_agent_grant.revoked",
+        entityType: "cross_company_agent_grant",
+        entityId: grant.id,
+        details,
+      });
+      await logActivity(db, {
+        companyId: grant.targetCompanyId,
+        actorType: "user",
+        actorId: req.actor.userId ?? "board",
+        action: "cross_company_agent_grant.revoked",
+        entityType: "cross_company_agent_grant",
+        entityId: grant.id,
+        details,
+      });
+
+      res.json(grant);
     }
   );
 

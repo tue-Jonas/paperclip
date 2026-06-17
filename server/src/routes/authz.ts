@@ -56,6 +56,9 @@ export function assertCompanyAccess(req: Request, companyId: string) {
     throw forbidden("Agent key cannot access another company");
   }
   if (req.actor.type === "board" && req.actor.source !== "local_implicit") {
+    if (req.actor.source !== "cloud_tenant" && req.actor.isInstanceAdmin) {
+      return;
+    }
     const allowedCompanies = req.actor.companyIds ?? [];
     if (!allowedCompanies.includes(companyId)) {
       throw forbidden("User does not have access to this company");

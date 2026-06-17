@@ -5,6 +5,7 @@ import {
   companies,
   companyMemberships,
   createDb,
+  crossCompanyAgentGrants,
   instanceUserRoles,
   issues,
   principalPermissionGrants,
@@ -16,14 +17,28 @@ import {
   startEmbeddedPostgresTestDatabase,
 } from "./helpers/embedded-postgres.js";
 import { authorizationService } from "../services/authorization.js";
+import { CROSS_COMPANY_AGENT_SOURCE_COMPANY_IDS_ENV_VAR } from "../services/cross-company-agent-grants.js";
 
 const embeddedPostgresSupport = await getEmbeddedPostgresTestSupport();
 const describeEmbeddedPostgres = embeddedPostgresSupport.supported ? describe : describe.skip;
+const TEST_SOURCE_COMPANY_ID = "11111111-1111-4111-8111-111111111111";
 
 async function createCompany(db: ReturnType<typeof createDb>, label: string) {
   return db
     .insert(companies)
     .values({
+      name: `Authorization ${label} ${randomUUID()}`,
+      issuePrefix: `AZ${randomUUID().slice(0, 6).toUpperCase()}`,
+    })
+    .returning()
+    .then((rows) => rows[0]!);
+}
+
+async function createNamedCompany(db: ReturnType<typeof createDb>, id: string, label: string) {
+  return db
+    .insert(companies)
+    .values({
+      id,
       name: `Authorization ${label} ${randomUUID()}`,
       issuePrefix: `AZ${randomUUID().slice(0, 6).toUpperCase()}`,
     })
@@ -117,13 +132,17 @@ async function grantAgentPermission(
 describeEmbeddedPostgres("authorization service", () => {
   let db!: ReturnType<typeof createDb>;
   let tempDb: Awaited<ReturnType<typeof startEmbeddedPostgresTestDatabase>> | null = null;
+  const previousAllowedSourceCompanyIds =
+    process.env[CROSS_COMPANY_AGENT_SOURCE_COMPANY_IDS_ENV_VAR];
 
   beforeAll(async () => {
     tempDb = await startEmbeddedPostgresTestDatabase("paperclip-authorization-service-");
     db = createDb(tempDb.connectionString);
+    process.env[CROSS_COMPANY_AGENT_SOURCE_COMPANY_IDS_ENV_VAR] = TEST_SOURCE_COMPANY_ID;
   }, 20_000);
 
   afterEach(async () => {
+    await db.delete(crossCompanyAgentGrants);
     await db.delete(principalPermissionGrants);
     await db.delete(companyMemberships);
     await db.delete(instanceUserRoles);
@@ -134,6 +153,12 @@ describeEmbeddedPostgres("authorization service", () => {
   });
 
   afterAll(async () => {
+    if (previousAllowedSourceCompanyIds === undefined) {
+      delete process.env[CROSS_COMPANY_AGENT_SOURCE_COMPANY_IDS_ENV_VAR];
+    } else {
+      process.env[CROSS_COMPANY_AGENT_SOURCE_COMPANY_IDS_ENV_VAR] =
+        previousAllowedSourceCompanyIds;
+    }
     await tempDb?.cleanup();
   });
 
@@ -220,6 +245,125 @@ describeEmbeddedPostgres("authorization service", () => {
       reason: "deny_company_boundary",
     });
     expect(decision.explanation).toContain("Agent key cannot access another company");
+  });
+
+  it("allows configured source-company agents with an active cross-company read grant to read another company", async () => {
+    const sourceCompany = await createNamedCompany(db, TEST_SOURCE_COMPANY_ID, "Source");
+    const targetCompany = await createCompany(db, "TargetRead");
+    const actorAgent = await createAgent(db, sourceCompany.id);
+    const targetIssue = await createIssue(db, targetCompany.id);
+
+    await db.insert(crossCompanyAgentGrants).values({
+      sourceCompanyId: sourceCompany.id,
+      principalType: "agent",
+      principalId: actorAgent.id,
+      targetCompanyId: targetCompany.id,
+      capability: "read",
+      status: "active",
+      createdByUserId: "owner",
+    });
+
+    const decision = await authorizationService(db).decide({
+      actor: { type: "agent", agentId: actorAgent.id, companyId: sourceCompany.id, source: "agent_jwt" },
+      action: "issue:read",
+      resource: { type: "issue", companyId: targetCompany.id, issueId: targetIssue.id },
+    });
+
+    expect(decision).toMatchObject({
+      allowed: true,
+      reason: "allow_cross_company_grant",
+      crossCompanyGrant: {
+        sourceCompanyId: sourceCompany.id,
+        principalId: actorAgent.id,
+        targetCompanyId: targetCompany.id,
+        capability: "read",
+      },
+    });
+  });
+
+  it("denies configured source-company cross-company reads without an active grant", async () => {
+    const sourceCompany = await createNamedCompany(db, TEST_SOURCE_COMPANY_ID, "SourceNoGrant");
+    const targetCompany = await createCompany(db, "TargetNoGrant");
+    const actorAgent = await createAgent(db, sourceCompany.id);
+    const targetIssue = await createIssue(db, targetCompany.id);
+
+    const decision = await authorizationService(db).decide({
+      actor: { type: "agent", agentId: actorAgent.id, companyId: sourceCompany.id, source: "agent_jwt" },
+      action: "issue:read",
+      resource: { type: "issue", companyId: targetCompany.id, issueId: targetIssue.id },
+    });
+
+    expect(decision).toMatchObject({
+      allowed: false,
+      reason: "deny_missing_grant",
+    });
+    expect(decision.explanation).toContain("cross-company read grant");
+  });
+
+  it("keeps non-allowlisted agents denied even if a cross-company grant row exists", async () => {
+    const sourceCompany = await createCompany(db, "OtherSource");
+    const targetCompany = await createCompany(db, "OtherTarget");
+    const actorAgent = await createAgent(db, sourceCompany.id);
+    const targetProject = await createProject(db, targetCompany.id, "Target");
+
+    await db.insert(crossCompanyAgentGrants).values({
+      sourceCompanyId: sourceCompany.id,
+      principalType: "agent",
+      principalId: actorAgent.id,
+      targetCompanyId: targetCompany.id,
+      capability: "read",
+      status: "active",
+      createdByUserId: "owner",
+    });
+
+    const decision = await authorizationService(db).decide({
+      actor: { type: "agent", agentId: actorAgent.id, companyId: sourceCompany.id, source: "agent_key" },
+      action: "project:read",
+      resource: { type: "project", companyId: targetCompany.id, projectId: targetProject.id },
+    });
+
+    expect(decision).toMatchObject({
+      allowed: false,
+      reason: "deny_company_boundary",
+    });
+    expect(decision.explanation).toContain("configured source-company agents");
+  });
+
+  it("keeps writes and secrets outside the cross-company read grant", async () => {
+    const sourceCompany = await createNamedCompany(db, TEST_SOURCE_COMPANY_ID, "SourceWrite");
+    const targetCompany = await createCompany(db, "TargetWrite");
+    const actorAgent = await createAgent(db, sourceCompany.id);
+    const targetIssue = await createIssue(db, targetCompany.id);
+
+    await db.insert(crossCompanyAgentGrants).values({
+      sourceCompanyId: sourceCompany.id,
+      principalType: "agent",
+      principalId: actorAgent.id,
+      targetCompanyId: targetCompany.id,
+      capability: "read",
+      status: "active",
+      createdByUserId: "owner",
+    });
+
+    const mutateDecision = await authorizationService(db).decide({
+      actor: { type: "agent", agentId: actorAgent.id, companyId: sourceCompany.id, source: "agent_jwt" },
+      action: "issue:mutate",
+      resource: { type: "issue", companyId: targetCompany.id, issueId: targetIssue.id },
+    });
+    expect(mutateDecision).toMatchObject({
+      allowed: false,
+      reason: "deny_company_boundary",
+    });
+
+    const secretsDecision = await authorizationService(db).decide({
+      actor: { type: "agent", agentId: actorAgent.id, companyId: sourceCompany.id, source: "agent_jwt" },
+      action: "secrets:read",
+      resource: { type: "company", companyId: targetCompany.id },
+    });
+    expect(secretsDecision).toMatchObject({
+      allowed: false,
+      reason: "deny_company_boundary",
+    });
   });
 
   it("allows simple-mode task assignment between same-company agents without explicit grants", async () => {

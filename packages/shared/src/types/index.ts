@@ -1,5 +1,32 @@
 export type { Company } from "./company.js";
 export type {
+  ManagementAnalyzerAccessSummary,
+  ManagementAnalyzerActionCount,
+  ManagementAnalyzerApprovalEvidence,
+  ManagementAnalyzerBoardActionEvidence,
+  ManagementAnalyzerBoardCommentEvidence,
+  ManagementAnalyzerMetricSummary,
+  ManagementAnalyzerRoutineRunEvidence,
+  ManagementAnalyzerRunEvidence,
+  ManagementAnalyzerSnapshotEvidence,
+  ManagementAnalyzerSnapshotResponse,
+  ManagementAnalyzerStatusChangeEvidence,
+  ManagementAnalyzerWindow,
+  ManagementAgentSummary,
+  ManagementApprovalSummary,
+  ManagementCompanyDetailResponse,
+  ManagementCompanyHealthSummary,
+  ManagementCompanyListResponse,
+  ManagementCompanySummary,
+  ManagementIssueBlockerSummary,
+  ManagementIssueListResponse,
+  ManagementIssueRecoverySummary,
+  ManagementIssueSummary,
+  ManagementProjectSummary,
+  ManagementRunListResponse,
+  ManagementRunSummary,
+} from "./management.js";
+export type {
   Environment,
   EnvironmentLease,
   EnvironmentProbeResult,
@@ -486,6 +513,8 @@ export type {
   AdminUserDirectoryEntry,
   UserCompanyAccessEntry,
   UserCompanyAccessResponse,
+  CrossCompanyAgentGrantRecord,
+  CrossCompanyAgentGrantListResponse,
 } from "./access.js";
 export type { QuotaWindow, ProviderQuotaResult } from "./quota.js";
 export type {

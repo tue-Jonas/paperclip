@@ -193,6 +193,14 @@ export const queryKeys = {
   resourceMemberships: {
     mine: (companyId: string) => ["resource-memberships", companyId, "me"] as const,
   },
+  management: {
+    companies: ["management", "companies"] as const,
+    company: (companyId: string) => ["management", "companies", companyId] as const,
+    companyIssues: (companyId: string, status?: string, offset?: number) =>
+      ["management", "companies", companyId, "issues", status ?? "all", offset ?? 0] as const,
+    companyRuns: (companyId: string, activeOnly: boolean) =>
+      ["management", "companies", companyId, "runs", activeOnly] as const,
+  },
   instance: {
     generalSettings: ["instance", "general-settings"] as const,
     schedulerHeartbeats: ["instance", "scheduler-heartbeats"] as const,
