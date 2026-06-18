@@ -318,6 +318,7 @@ export function buildSuccessfulRunHandoffInstruction(input: {
     "",
     "**Does someone else need to look at it?**",
     "2. Move it to `in_review` with a real reviewer path — `executionState.currentParticipant`, a human owner via `assigneeUserId`, a pending issue-thread interaction, or a linked pending approval.",
+    "   When routing a decision/sign-off to a human owner, the owner is the issue's **initiator**: use `rootHumanRequester.userId` from the issue's heartbeat-context (the human who started this work, found by walking the parent chain). Do NOT guess or hardcode a specific person. If there is no human initiator anywhere in the chain (routines / automated work), omit `assigneeUserId` and instead create the interaction/approval and let Paperclip route it to the configured default decision owner.",
     "",
     "**Can it not continue right now?**",
     "3. Mark it `blocked` with first-class blockers (`blockedByIssueIds`) or a clearly named unblock owner/action.",

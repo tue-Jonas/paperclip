@@ -149,23 +149,33 @@ export async function resolveDecisionOwnerUserId(db: Db, args: {
     return { userId: explicitUserId, source: "explicit_user" };
   }
 
-  const sourceCommentAuthor = await findSourceCommentAuthor(db, {
-    companyId: args.companyId,
-    sourceCommentId: args.sourceCommentId,
-  });
-  if (sourceCommentAuthor) return sourceCommentAuthor;
-
+  // The initiator owns the decision. Resolve the rootmost human requester in
+  // the issue's parent chain FIRST, so a decision/approval always follows whoever
+  // started the work (e.g. Thomas) rather than an incidental signal like someone
+  // else commenting on the thread or the board actor who happened to create the
+  // interaction. Explicit targeting (handled above) still wins for deliberate
+  // hand-offs like "send it back to me".
   const rootHumanRequester = await findRootHumanRequester(db, {
     companyId: args.companyId,
     issueIds: args.issueIds,
   });
   if (rootHumanRequester) return rootHumanRequester;
 
+  // No human initiator anywhere in the chain (routines / automated work): fall
+  // back to weaker signals before the configured default owner.
+  const sourceCommentAuthor = await findSourceCommentAuthor(db, {
+    companyId: args.companyId,
+    sourceCommentId: args.sourceCommentId,
+  });
+  if (sourceCommentAuthor) return sourceCommentAuthor;
+
   const currentUserId = normalizeUserId(args.currentUserId);
   if (currentUserId) {
     return { userId: currentUserId, source: "current_board_actor" };
   }
 
+  // Routine / automated work with no human initiator routes to the configured
+  // default decision owner (instance-wide), never to "none".
   return await findConfiguredDefaultOwner(db)
     ?? { userId: null, source: "none" };
 }

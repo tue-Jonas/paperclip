@@ -92,12 +92,13 @@ describeEmbeddedPostgres("decision owner resolution", () => {
     });
   }
 
-  it("prefers explicit user, then source comment author, then root human requester", async () => {
+  it("prefers explicit user, then the initiator (root human requester) over an incidental comment author", async () => {
     const { companyId, childIssueId } = await seedIssueTree();
     const sourceCommentId = randomUUID();
     await seedActiveCompanyUser(companyId, "explicit-user");
     await seedActiveCompanyUser(companyId, "thomas-user");
     await seedActiveCompanyUser(companyId, "jonas-user");
+    // A non-initiator (thomas) comments on an issue that jonas initiated.
     await db.insert(issueComments).values({
       id: sourceCommentId,
       companyId,
@@ -106,6 +107,7 @@ describeEmbeddedPostgres("decision owner resolution", () => {
       body: "Please ask me.",
     });
 
+    // Explicit targeting always wins (deliberate hand-off / "send it back to X").
     await expect(resolveDecisionOwnerUserId(db, {
       companyId,
       explicitUserId: "explicit-user",
@@ -117,23 +119,73 @@ describeEmbeddedPostgres("decision owner resolution", () => {
       source: "explicit_user",
     });
 
+    // No explicit target: the decision follows the INITIATOR (jonas, the rootmost
+    // human creator), NOT the comment author (thomas) or the current board actor.
     await expect(resolveDecisionOwnerUserId(db, {
       companyId,
       sourceCommentId,
       issueIds: [childIssueId],
       currentUserId: "current-user",
     })).resolves.toMatchObject({
-      userId: "thomas-user",
-      source: "source_comment_author",
+      userId: "jonas-user",
+      source: "root_human_requester",
+    });
+  });
+
+  it("falls back to the comment author only when there is no human initiator in the chain", async () => {
+    const { companyId } = await seedIssueTree();
+    const automatedIssueId = randomUUID();
+    const sourceCommentId = randomUUID();
+    await seedActiveCompanyUser(companyId, "thomas-user");
+    // Routine/automated issue: no human creator anywhere in its chain.
+    await db.insert(issues).values({
+      id: automatedIssueId,
+      companyId,
+      title: "Automated routine issue",
+      status: "in_progress",
+      priority: "medium",
+    });
+    await db.insert(issueComments).values({
+      id: sourceCommentId,
+      companyId,
+      issueId: automatedIssueId,
+      authorUserId: "thomas-user",
+      body: "I will take this.",
     });
 
     await expect(resolveDecisionOwnerUserId(db, {
       companyId,
-      issueIds: [childIssueId],
+      sourceCommentId,
+      issueIds: [automatedIssueId],
       currentUserId: "current-user",
     })).resolves.toMatchObject({
+      userId: "thomas-user",
+      source: "source_comment_author",
+    });
+  });
+
+  it("routes automated work with no human initiator to the configured default owner", async () => {
+    const { companyId } = await seedIssueTree();
+    const automatedIssueId = randomUUID();
+    await seedActiveCompanyUser(companyId, "jonas-user");
+    await db.insert(issues).values({
+      id: automatedIssueId,
+      companyId,
+      title: "Automated routine issue",
+      status: "in_progress",
+      priority: "medium",
+    });
+    await instanceSettingsService(db).updateGeneral({
+      defaultDecisionOwnerUserId: "jonas-user",
+    });
+
+    // No initiator, no comment, no current actor -> configured default (jonas).
+    await expect(resolveDecisionOwnerUserId(db, {
+      companyId,
+      issueIds: [automatedIssueId],
+    })).resolves.toMatchObject({
       userId: "jonas-user",
-      source: "root_human_requester",
+      source: "configured_default_board_owner",
     });
   });
 
