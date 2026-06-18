@@ -59,6 +59,7 @@ import { getSecretProvider } from "../secrets/provider-registry.js";
 import { parseCron, validateCron } from "./cron.js";
 import { heartbeatService } from "./heartbeat.js";
 import { queueIssueAssignmentWakeup, type IssueAssignmentWakeupDeps } from "./issue-assignment-wakeup.js";
+import { resolveExternalInitiatorUserId } from "./decision-owner.js";
 import { logActivity } from "./activity-log.js";
 import type { PluginWorkerManager } from "./plugin-worker-manager.js";
 
@@ -1227,6 +1228,30 @@ export function routineService(
       title,
       description,
     });
+    // Initiator (root human requester) for the execution issue. Manual fires
+    // carry the triggering board user directly; externally-triggered fires
+    // (webhook / API, e.g. the "Jira intake" routine) resolve the initiating
+    // human from the trigger payload so decisions follow them. Resolve this
+    // BEFORE the transaction below: it is read-only and must not contend for
+    // the transaction's single reserved connection (doing so deadlocks).
+    // Unresolved => null, so downstream decisions route to the default owner.
+    const manualRunnerUserId = input.source === "manual" ? input.actor?.userId ?? null : null;
+    let initiatorUserId: string | null = manualRunnerUserId;
+    if (!initiatorUserId && (input.source === "webhook" || input.source === "api")) {
+      try {
+        const resolvedInitiator = await resolveExternalInitiatorUserId(db, {
+          companyId: input.routine.companyId,
+          payload: triggerPayload,
+        });
+        initiatorUserId = resolvedInitiator?.userId ?? null;
+      } catch (error) {
+        logger.warn(
+          { err: error, routineId: input.routine.id, source: input.source },
+          "routine: failed to resolve external initiator; leaving execution issue without an initiator",
+        );
+        initiatorUserId = null;
+      }
+    }
     const run = await db.transaction(async (tx) => {
       const txDb = tx as unknown as Db;
       await tx.execute(
@@ -1253,7 +1278,6 @@ export function routineService(
       }
 
       const triggeredAt = new Date();
-      const manualRunnerUserId = input.source === "manual" ? input.actor?.userId ?? null : null;
       const [createdRun] = await txDb
         .insert(routineRuns)
         .values({
@@ -1282,11 +1306,11 @@ export function routineService(
         });
         if (activeIssue && input.routine.concurrencyPolicy !== "always_enqueue") {
           const status = input.routine.concurrencyPolicy === "skip_if_active" ? "skipped" : "coalesced";
-          if (manualRunnerUserId) {
+          if (initiatorUserId) {
             await touchIssueForUserInbox(txDb, {
               companyId: input.routine.companyId,
               issueId: activeIssue.id,
-              userId: manualRunnerUserId,
+              userId: initiatorUserId,
               touchedAt: triggeredAt,
             });
           }
@@ -1318,7 +1342,7 @@ export function routineService(
             priority: input.routine.priority,
             assigneeAgentId,
             createdByAgentId: input.source === "manual" ? input.actor?.agentId ?? null : null,
-            createdByUserId: manualRunnerUserId,
+            createdByUserId: initiatorUserId,
             originKind: issueOriginKind,
             originId: issueOriginId,
             originRunId: createdRun.id,
@@ -1346,11 +1370,11 @@ export function routineService(
           });
           if (!existingIssue) throw error;
           const status = input.routine.concurrencyPolicy === "skip_if_active" ? "skipped" : "coalesced";
-          if (manualRunnerUserId) {
+          if (initiatorUserId) {
             await touchIssueForUserInbox(txDb, {
               companyId: input.routine.companyId,
               issueId: existingIssue.id,
-              userId: manualRunnerUserId,
+              userId: initiatorUserId,
               touchedAt: triggeredAt,
             });
           }

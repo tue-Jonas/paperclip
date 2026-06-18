@@ -33,6 +33,11 @@ export const instanceGeneralSettingsSchema = z.object({
   censorUsernameInLogs: z.boolean().default(false),
   keyboardShortcuts: z.boolean().default(false),
   defaultDecisionOwnerUserId: z.string().trim().min(1).max(160).nullable().default(null),
+  // External-initiator identity -> Paperclip board user id, used to attribute
+  // webhook/API routine fires (e.g. Jira intake) to the human who initiated them.
+  externalInitiatorUserMap: z
+    .record(z.string().trim().min(1).max(320), z.string().trim().min(1).max(160))
+    .optional(),
   feedbackDataSharingPreference: feedbackDataSharingPreferenceSchema.default(
     DEFAULT_FEEDBACK_DATA_SHARING_PREFERENCE,
   ),

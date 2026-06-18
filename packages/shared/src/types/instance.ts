@@ -64,6 +64,14 @@ export interface InstanceGeneralSettings {
   censorUsernameInLogs: boolean;
   keyboardShortcuts: boolean;
   defaultDecisionOwnerUserId: string | null;
+  /**
+   * Maps an external initiator identity carried in a webhook/API routine
+   * trigger payload (e.g. a Jira assignee display name, email, or account id)
+   * to a Paperclip board user id. Lets externally-triggered work (e.g. the
+   * "Jira intake" routine) be attributed to the human who initiated it so
+   * decisions follow that person. Keys are matched case-insensitively.
+   */
+  externalInitiatorUserMap?: Record<string, string>;
   feedbackDataSharingPreference: FeedbackDataSharingPreference;
   backupRetention: BackupRetentionPolicy;
   /**

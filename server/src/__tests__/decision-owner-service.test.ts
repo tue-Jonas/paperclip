@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
+  authUsers,
   companyMemberships,
   companies,
   createDb,
@@ -13,7 +14,10 @@ import {
   getEmbeddedPostgresTestSupport,
   startEmbeddedPostgresTestDatabase,
 } from "./helpers/embedded-postgres.js";
-import { resolveDecisionOwnerUserId } from "../services/decision-owner.js";
+import {
+  resolveDecisionOwnerUserId,
+  resolveExternalInitiatorUserId,
+} from "../services/decision-owner.js";
 import { instanceSettingsService } from "../services/instance-settings.js";
 
 const embeddedPostgresSupport = await getEmbeddedPostgresTestSupport();
@@ -33,9 +37,22 @@ describeEmbeddedPostgres("decision owner resolution", () => {
     await db.delete(issues);
     await db.delete(goals);
     await db.delete(companyMemberships);
+    await db.delete(authUsers);
     await db.delete(instanceSettings);
     await db.delete(companies);
   });
+
+  async function seedAuthUser(userId: string, name: string, email: string) {
+    const now = new Date();
+    await db.insert(authUsers).values({
+      id: userId,
+      name,
+      email,
+      emailVerified: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
 
   afterAll(async () => {
     await tempDb?.cleanup();
@@ -230,6 +247,62 @@ describeEmbeddedPostgres("decision owner resolution", () => {
     })).rejects.toMatchObject({
       status: 400,
       message: "Explicit decision owner must be an active user in this company",
+    });
+  });
+
+  describe("resolveExternalInitiatorUserId (webhook/API initiator)", () => {
+    async function seedCompanyWithUsers() {
+      const companyId = randomUUID();
+      await db.insert(companies).values({
+        id: companyId,
+        name: "Paperclip",
+        issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+        requireBoardApprovalForNewAgents: false,
+      });
+      await seedAuthUser("jonas-user", "TueJon", "mail@jonastuechler.at");
+      await seedAuthUser("thomas-user", "Thomas", "t.baumeister@twb-digital.at");
+      await seedActiveCompanyUser(companyId, "jonas-user", "owner");
+      await seedActiveCompanyUser(companyId, "thomas-user", "operator");
+      // Jira display names differ from Paperclip member names, so they must be mapped.
+      await instanceSettingsService(db).updateGeneral({
+        externalInitiatorUserMap: {
+          "Jonas Tüchler": "jonas-user",
+          "Thomas Baumeister": "thomas-user",
+        },
+      });
+      return companyId;
+    }
+
+    it("maps a Jira assignee display name to the initiator via the configured map", async () => {
+      const companyId = await seedCompanyWithUsers();
+      await expect(resolveExternalInitiatorUserId(db, {
+        companyId,
+        payload: { key: "WAA-99", assignee: "Thomas Baumeister", summary: "x" },
+      })).resolves.toMatchObject({ userId: "thomas-user", source: "configured_external_map" });
+    });
+
+    it("matches an assignee email to an active member", async () => {
+      const companyId = await seedCompanyWithUsers();
+      await expect(resolveExternalInitiatorUserId(db, {
+        companyId,
+        payload: { assigneeEmail: "T.Baumeister@twb-digital.at" },
+      })).resolves.toMatchObject({ userId: "thomas-user", source: "member_email_match" });
+    });
+
+    it("prefers an explicit board user id in the payload", async () => {
+      const companyId = await seedCompanyWithUsers();
+      await expect(resolveExternalInitiatorUserId(db, {
+        companyId,
+        payload: { initiatorUserId: "jonas-user", assignee: "Thomas Baumeister" },
+      })).resolves.toMatchObject({ userId: "jonas-user", source: "payload_user_id" });
+    });
+
+    it("returns null when no initiator can be resolved (routes to default owner)", async () => {
+      const companyId = await seedCompanyWithUsers();
+      await expect(resolveExternalInitiatorUserId(db, {
+        companyId,
+        payload: { assignee: "Someone Unknown" },
+      })).resolves.toBeNull();
     });
   });
 });

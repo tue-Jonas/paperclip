@@ -1,6 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import { companyMemberships, issueComments, issues } from "@paperclipai/db";
+import { authUsers, companyMemberships, issueComments, issues } from "@paperclipai/db";
 import { badRequest } from "../errors.js";
 import { instanceSettingsService } from "./instance-settings.js";
 
@@ -178,6 +178,126 @@ export async function resolveDecisionOwnerUserId(db: Db, args: {
   // default decision owner (instance-wide), never to "none".
   return await findConfiguredDefaultOwner(db)
     ?? { userId: null, source: "none" };
+}
+
+export type ExternalInitiatorResolutionSource =
+  | "payload_user_id"
+  | "configured_external_map"
+  | "member_email_match"
+  | "member_name_match";
+
+export interface ExternalInitiatorResolution {
+  userId: string;
+  source: ExternalInitiatorResolutionSource;
+  matchedOn: string;
+}
+
+type ActiveCompanyUser = { userId: string; name: string | null; email: string | null };
+
+async function loadActiveCompanyUsers(db: Db, companyId: string): Promise<ActiveCompanyUser[]> {
+  return db
+    .select({
+      userId: companyMemberships.principalId,
+      name: authUsers.name,
+      email: authUsers.email,
+    })
+    .from(companyMemberships)
+    .innerJoin(authUsers, eq(authUsers.id, companyMemberships.principalId))
+    .where(
+      and(
+        eq(companyMemberships.companyId, companyId),
+        eq(companyMemberships.principalType, "user"),
+        eq(companyMemberships.status, "active"),
+      ),
+    );
+}
+
+function readPayloadString(payload: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = payload[key];
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed.length > 0) return trimmed;
+    }
+  }
+  return null;
+}
+
+/**
+ * Resolve which Paperclip board user *initiated* externally-triggered work
+ * (webhook / API routine fires, e.g. the "Jira intake" routine). The decision
+ * routing engine then attributes downstream decisions to that human via the
+ * issue's `createdByUserId` (root human requester). Resolution order:
+ *   1. explicit Paperclip board user id in the payload
+ *   2. configured `externalInitiatorUserMap` (Jira display name / email / accountId -> userId)
+ *   3. exact email match against an active company member
+ *   4. unambiguous display-name match against an active company member
+ * Returns null when no human initiator can be resolved (caller leaves the work
+ * with no initiator, so it routes to the configured default decision owner).
+ */
+export async function resolveExternalInitiatorUserId(db: Db, args: {
+  companyId: string;
+  payload: unknown;
+}): Promise<ExternalInitiatorResolution | null> {
+  const payload =
+    args.payload && typeof args.payload === "object" && !Array.isArray(args.payload)
+      ? (args.payload as Record<string, unknown>)
+      : {};
+
+  const explicitUserId = readPayloadString(payload, ["initiatorUserId", "paperclipUserId"]);
+  const accountId = readPayloadString(payload, ["assigneeAccountId", "initiatorAccountId", "accountId"]);
+  const emailCandidates: string[] = [];
+  const directEmail = readPayloadString(payload, ["assigneeEmail", "initiatorEmail", "email"]);
+  if (directEmail) emailCandidates.push(directEmail);
+  const nameCandidates: string[] = [];
+  const assignee = readPayloadString(payload, ["assignee", "initiator", "initiatorName", "assigneeName"]);
+  if (assignee) {
+    if (assignee.includes("@")) emailCandidates.push(assignee);
+    else nameCandidates.push(assignee);
+  }
+
+  const members = await loadActiveCompanyUsers(db, args.companyId);
+  const activeUserIds = new Set(members.map((m) => m.userId));
+
+  // 1. Explicit board user id.
+  if (explicitUserId && activeUserIds.has(explicitUserId)) {
+    return { userId: explicitUserId, source: "payload_user_id", matchedOn: explicitUserId };
+  }
+
+  // 2. Configured external identity map (case-insensitive keys).
+  const { externalInitiatorUserMap } = await instanceSettingsService(db).getGeneral();
+  if (externalInitiatorUserMap) {
+    const lowered = new Map(
+      Object.entries(externalInitiatorUserMap).map(([k, v]) => [k.trim().toLowerCase(), v]),
+    );
+    const keys = [explicitUserId, accountId, ...emailCandidates, ...nameCandidates].filter(
+      (v): v is string => Boolean(v),
+    );
+    for (const key of keys) {
+      const mapped = normalizeUserId(lowered.get(key.trim().toLowerCase()));
+      if (mapped && activeUserIds.has(mapped)) {
+        return { userId: mapped, source: "configured_external_map", matchedOn: key };
+      }
+    }
+  }
+
+  // 3. Email match against active members.
+  for (const email of emailCandidates) {
+    const lower = email.trim().toLowerCase();
+    const match = members.find((m) => m.email && m.email.trim().toLowerCase() === lower);
+    if (match) return { userId: match.userId, source: "member_email_match", matchedOn: email };
+  }
+
+  // 4. Unambiguous display-name match against active members.
+  for (const name of nameCandidates) {
+    const lower = name.trim().toLowerCase();
+    const matches = members.filter((m) => m.name && m.name.trim().toLowerCase() === lower);
+    if (matches.length === 1) {
+      return { userId: matches[0].userId, source: "member_name_match", matchedOn: name };
+    }
+  }
+
+  return null;
 }
 
 export async function loadIssueIdentifiers(db: Db, companyId: string, issueIds: string[]) {
