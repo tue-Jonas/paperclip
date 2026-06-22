@@ -232,6 +232,23 @@ export function isClaudeImageProcessingError(parsed: Record<string, unknown>): b
   );
 }
 
+// Conventional shell exit encodings for teardown-by-signal: 128 + signal number.
+const TEARDOWN_EXIT_CODES = new Set([130, 137, 143]);
+const TEARDOWN_SIGNALS = new Set(["SIGINT", "SIGKILL", "SIGTERM"]);
+
+export function isPostResultTeardownExit(input: {
+  exitCode?: number | null;
+  signal?: string | null;
+  parsedIsError: boolean;
+}): boolean {
+  if (input.parsedIsError) return false;
+
+  const exitCode = input.exitCode ?? 0;
+  if (TEARDOWN_EXIT_CODES.has(exitCode)) return true;
+
+  return input.signal != null && TEARDOWN_SIGNALS.has(input.signal);
+}
+
 function buildClaudeTransientHaystack(input: {
   parsed?: Record<string, unknown> | null;
   stdout?: string | null;
