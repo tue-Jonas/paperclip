@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   detectClaudeLoginRequired,
   extractClaudeRetryNotBefore,
+  isPostResultTeardownExit,
   isClaudeTransientUpstreamError,
   isClaudePoisonedPreviousMessageIdError,
   isClaudeUnknownSessionError,
@@ -285,5 +286,29 @@ describe("extractClaudeRetryNotBefore", () => {
     expect(
       extractClaudeRetryNotBefore({ errorMessage: "Overloaded. Try again later." }, new Date()),
     ).toBeNull();
+  });
+});
+
+describe("isPostResultTeardownExit", () => {
+  it("treats exit 143 after a successful result as teardown, not failure", () => {
+    expect(isPostResultTeardownExit({ exitCode: 143, signal: null, parsedIsError: false })).toBe(true);
+  });
+
+  it("recognizes SIGINT and SIGKILL teardown exit codes", () => {
+    expect(isPostResultTeardownExit({ exitCode: 130, signal: null, parsedIsError: false })).toBe(true);
+    expect(isPostResultTeardownExit({ exitCode: 137, signal: null, parsedIsError: false })).toBe(true);
+  });
+
+  it("recognizes teardown via the signal field when exitCode is null", () => {
+    expect(isPostResultTeardownExit({ exitCode: null, signal: "SIGTERM", parsedIsError: false })).toBe(true);
+  });
+
+  it("does not treat clean exits or unrelated failures as teardown", () => {
+    expect(isPostResultTeardownExit({ exitCode: 0, signal: null, parsedIsError: false })).toBe(false);
+    expect(isPostResultTeardownExit({ exitCode: 1, signal: null, parsedIsError: false })).toBe(false);
+  });
+
+  it("never masks genuine Claude errors", () => {
+    expect(isPostResultTeardownExit({ exitCode: 143, signal: "SIGTERM", parsedIsError: true })).toBe(false);
   });
 });
