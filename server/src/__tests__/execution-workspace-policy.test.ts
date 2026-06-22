@@ -171,6 +171,7 @@ describe("execution workspace policy helpers", () => {
     ).toEqual({
       environmentId: "agent-env",
       source: "agent",
+      conflict: null,
     });
   });
 
@@ -184,6 +185,7 @@ describe("execution workspace policy helpers", () => {
     ).toEqual({
       environmentId: "instance-env",
       source: "instance",
+      conflict: null,
     });
   });
 
@@ -197,6 +199,7 @@ describe("execution workspace policy helpers", () => {
     ).toEqual({
       environmentId: "local-env",
       source: "default",
+      conflict: null,
     });
   });
 
