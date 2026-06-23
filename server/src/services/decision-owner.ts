@@ -4,6 +4,7 @@ import { companyMemberships, issueComments, issues } from "@paperclipai/db";
 import { badRequest } from "../errors.js";
 import { instanceSettingsService } from "./instance-settings.js";
 import { issueRequesterService } from "./issue-requester.js";
+import { normalizeUserId } from "./user-ids.js";
 
 export type DecisionOwnerResolutionSource =
   | "explicit_user"
@@ -18,11 +19,6 @@ export interface DecisionOwnerResolution {
   source: DecisionOwnerResolutionSource;
   issueId?: string | null;
   commentId?: string | null;
-}
-
-function normalizeUserId(value: string | null | undefined): string | null {
-  const normalized = typeof value === "string" ? value.trim() : "";
-  return normalized.length > 0 ? normalized : null;
 }
 
 async function findSourceCommentAuthor(db: Db, args: {

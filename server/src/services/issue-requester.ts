@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { issues } from "@paperclipai/db";
 import type { IssueRootHumanRequester } from "@paperclipai/shared";
+import { normalizeUserId } from "./user-ids.js";
 
 const MAX_ISSUE_PARENT_WALK_DEPTH = 50;
 
@@ -13,11 +14,12 @@ type IssueRequesterPathNode = {
   createdByUserId: string | null;
 };
 
-function normalizeUserId(value: string | null | undefined): string | null {
-  const normalized = typeof value === "string" ? value.trim() : "";
-  return normalized.length > 0 ? normalized : null;
-}
-
+/**
+ * Resolves requester attribution from an already-loaded issue path.
+ *
+ * `ancestors` must be ordered closest-parent first through rootmost ancestor,
+ * matching `issueService.getAncestors()` and the DB parent walk in this file.
+ */
 export function resolveRootHumanRequesterFromIssuePath(args: {
   issue: IssueRequesterPathNode;
   ancestors: IssueRequesterPathNode[];
