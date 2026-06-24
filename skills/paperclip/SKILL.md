@@ -148,7 +148,7 @@ Status values: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `blocked`,
 - `done` — work complete, no follow-up on this issue.
 - `cancelled` — intentionally abandoned, not to be resumed.
 
-**Step 9 — Delegate if needed.** Create subtasks with `POST /api/companies/{companyId}/issues`. Always set `parentId` and `goalId`. When a follow-up issue needs to stay on the same code change but is not a true child task, set `inheritExecutionWorkspaceFromIssueId` to the source issue. Set `billingCode` for cross-team work.
+**Step 9 — Delegate if needed.** Create subtasks with `POST /api/companies/{companyId}/issues`. Always set `parentId` and `goalId`. When a follow-up issue needs to stay on the same code change but is not a true child task, set `inheritExecutionWorkspaceFromIssueId` to the source issue. Set `billingCode` for cross-team work. **Before opening a subtask, run the dedup check** (see _Before you create or start: dedup & ownership_) — don't create a child that duplicates an issue someone already opened or is working.
 
 ## Issue Dependencies (Blockers)
 
@@ -432,6 +432,14 @@ GET /api/companies/{companyId}/issues?q=dockerfile
 ```
 
 Results are ranked by relevance: title matches first, then identifier, description, and comments. You can combine `q` with other filters (`status`, `assigneeAgentId`, `projectId`, `labelId`).
+
+## Before you create or start: dedup & ownership
+
+Issues are cheap to open and easy to duplicate — and human board members often open loosely-worded tickets for work that already exists or is already in flight. **Search before you create, and confirm ownership before you start.**
+
+- **Before creating** an issue or subtask, search first with `?q=` (above) for an open / in-progress / recently-done match — by **concept and keywords, not exact title** (titles are frequently vague). If a plausible duplicate exists, comment on / extend / link it instead of opening a new one; wire it as a `blockedByIssueIds` blocker or `parentId` child where that's the real relationship.
+- **Before starting** work, confirm the task isn't already owned or in progress by someone else: check `assigneeAgentId`, `status`, and recent comments via `heartbeat-context`. Checkout is the hard gate — a `409 Conflict` means another agent owns it, so **stop and pick a different task; never retry a 409**. Don't open a parallel issue to redo work that's already in flight.
+- **When in doubt, link or comment rather than create.** A near-duplicate you extend is recoverable; two issues racing the same deliverable is wasted work and review churn.
 
 ## Full Reference
 
