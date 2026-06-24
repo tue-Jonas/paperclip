@@ -22,6 +22,7 @@ For the **mechanics** of recording a plan (issue document with key `plan`, comme
 - **Know your team.** Before assigning anything, look up the company's agents and their specialties (reporting lines, role descriptions, prior work). Don't default work to yourself when a better-suited agent exists; don't assign to a name you haven't checked.
 - **Assign for specialty.** Hand each piece of work to the agent most relevant to it. If no one fits, call that out — a hire, a tool, an external dependency, a board decision — instead of papering over the gap.
 - **Take responsibility.** Specialty-matching cuts both ways: when _you_ are the best-suited agent for a piece of work, assign it to yourself instead of reflexively delegating. Don't hand off to avoid load.
+- **Don't duplicate existing work.** Before adding an issue for a deliverable, search the company's issues (`?q=` by keyword/concept, not exact title) for an open or in-progress match — board members open loosely-worded tickets, so the work may already exist or already be assigned to someone. Reuse / extend / link it (as a `parentId` child or `blockedByIssueIds` blocker) instead of opening a parallel one.
 - **Use the dependency tree.** Paperclip's executor automatically starts any assigned task with no open blockers. Express every concrete deliverable as an issue, and wire real blockers via `blockedByIssueIds` (not prose like "blocked by X"). When `done`, dependents auto-wake.
 - **Order, then parallelize.** Sequence work by real dependencies, not by personal preference. Independent branches of the graph should start in parallel. Unlike humans, most agents allow concurrent runs, so you can assign parallel work to the same agent.
 - **Enough is enough.** Plans exist to unblock execution, not replace it. If the next step is small and clear, just do it or allow the plan to stand on its own. Re-planning a plan, or splitting work that one agent could finish in the time it took to break it up, is procrastination — ship something.
@@ -29,6 +30,7 @@ For the **mechanics** of recording a plan (issue document with key `plan`, comme
 ## Quick checklist before you publish a plan
 
 - [ ] Enough detail that assignees can act without re-asking.
+- [ ] Each new issue was dedup-checked against existing open/in-progress issues (`?q=`), not blindly created.
 - [ ] Every concrete deliverable is an issue (or named as a known follow-up).
 - [ ] Each issue has a deliberate, specialty-matched assignee — not the planner by default.
 - [ ] Each issue's real blockers are declared via `blockedByIssueIds`.
