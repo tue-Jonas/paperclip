@@ -1138,4 +1138,38 @@ describeEmbeddedPostgres("management routes", () => {
       .where(eq(issues.companyId, company.id));
     expect(issueCount).toHaveLength(0);
   }, 30_000);
+
+  it("returns 422 (not a generic 403) when the target company's only CEO is terminated", async () => {
+    const sourceCompany = await seedCompany(db, TEST_SOURCE_COMPANY_ID, "NoActiveCeoSource");
+    const targetCompany = await seedCompany(db, undefined, "NoActiveCeoTarget");
+    const sourceAgent = await seedAgent(db, sourceCompany.id, "NoActiveCeoSource");
+    await seedAgent(db, targetCompany.id, "TerminatedCeo", "terminated", "ceo");
+
+    await db.insert(crossCompanyAgentGrants).values({
+      sourceCompanyId: sourceCompany.id,
+      principalType: "agent",
+      principalId: sourceAgent.id,
+      targetCompanyId: targetCompany.id,
+      capability: "delegate",
+      status: "active",
+    });
+
+    const app = await createApp(db, {
+      type: "agent",
+      agentId: sourceAgent.id,
+      companyId: sourceCompany.id,
+    });
+
+    const res = await request(app)
+      .post(`/api/management/companies/${targetCompany.id}/delegated-issues`)
+      .send({ title: "No active CEO to default to" });
+    expect(res.status).toBe(422);
+    expect(res.body.error).toContain("no active CEO");
+
+    const issueCount = await db
+      .select({ id: issues.id })
+      .from(issues)
+      .where(eq(issues.companyId, targetCompany.id));
+    expect(issueCount).toHaveLength(0);
+  }, 30_000);
 });

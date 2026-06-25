@@ -262,14 +262,17 @@ export function managementRoutes(db: Db) {
     // the target company's CEO agent.
     let assigneeAgentId = body.assigneeAgentId ?? null;
     if (!assigneeAgentId) {
+      // Require an active (non-terminated) CEO. Falling back to a terminated CEO
+      // would just be denied by authz and surface a confusing generic 403 — a
+      // misconfigured company gets the actionable 422 instead.
       const ceo = await db
         .select({ id: agents.id, status: agents.status })
         .from(agents)
         .where(and(eq(agents.companyId, companyId), eq(agents.role, "ceo")))
-        .then((rows) => rows.find((row) => row.status !== "terminated") ?? rows[0] ?? null);
+        .then((rows) => rows.find((row) => row.status !== "terminated") ?? null);
       if (!ceo) {
         res.status(422).json({
-          error: "Target company has no CEO agent; specify an explicit assigneeAgentId",
+          error: "Target company has no active CEO agent; specify an explicit assigneeAgentId",
         });
         return;
       }

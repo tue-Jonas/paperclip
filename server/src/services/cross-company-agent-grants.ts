@@ -253,10 +253,13 @@ export function crossCompanyAgentGrantService(db: Db) {
 
   // Atomically reserve one use of a grant. The WHERE clause re-checks the full
   // active condition (status + expiry + remaining quota) so the increment cannot
-  // push usedCount past maxUses even under concurrent delegations — the database
-  // serializes the guarded UPDATE and only the rows that still satisfy the cap
-  // are touched. Returns the updated row when a use was reserved, or null when
-  // the grant is no longer exercisable (revoked, expired, or exhausted).
+  // push usedCount past maxUses even under concurrent delegations. PostgreSQL
+  // takes a row-level write lock for the matching row during `UPDATE ... WHERE`,
+  // so two concurrent callers are serialized on that row: the second re-evaluates
+  // the WHERE against the first writer's committed usedCount and matches zero rows
+  // once the cap is reached. No separate advisory lock or SELECT ... FOR UPDATE is
+  // needed. Returns the updated row when a use was reserved, or null when the
+  // grant is no longer exercisable (revoked, expired, or exhausted).
   async function recordUse(grantId: string, at: Date = new Date()) {
     return db
       .update(crossCompanyAgentGrants)
