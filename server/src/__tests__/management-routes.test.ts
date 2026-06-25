@@ -19,6 +19,7 @@ import {
   routineRuns,
   routines,
 } from "@paperclipai/db";
+import { LOW_TRUST_REVIEW_PRESET } from "@paperclipai/shared";
 import {
   getEmbeddedPostgresTestSupport,
   startEmbeddedPostgresTestDatabase,
@@ -71,6 +72,7 @@ async function seedAgent(
   label: string,
   status = "idle",
   role = "engineer",
+  permissions: Record<string, unknown> = {},
 ) {
   return db
     .insert(agents)
@@ -81,7 +83,7 @@ async function seedAgent(
       adapterType: "process",
       adapterConfig: {},
       runtimeConfig: {},
-      permissions: {},
+      permissions,
       status,
       lastHeartbeatAt: minutesAgo(30),
     })
@@ -912,12 +914,81 @@ describeEmbeddedPostgres("management routes", () => {
     const res = await request(app)
       .post(`/api/management/companies/${targetCompany.id}/delegated-issues`)
       .send({ title: "Wrong company assignee", assigneeAgentId: sourceAgent.id });
-    expect(res.status).toBe(422);
+    // Rejected at the authorization layer (assignee not in the target company)
+    // before any issue is created.
+    expect(res.status).toBe(403);
 
     const issueCount = await db
       .select({ id: issues.id })
       .from(issues)
       .where(eq(issues.companyId, targetCompany.id));
+    expect(issueCount).toHaveLength(0);
+  }, 30_000);
+
+  it("lets a standard same-company agent delegate to its own CEO with a single same-company audit row", async () => {
+    const company = await seedCompany(db, undefined, "SameCoDeleg");
+    const ceo = await seedAgent(db, company.id, "SameCoDelegCeo", "idle", "ceo");
+    const engineer = await seedAgent(db, company.id, "SameCoDelegEng");
+
+    const app = await createApp(db, {
+      type: "agent",
+      agentId: engineer.id,
+      companyId: company.id,
+    });
+
+    const res = await request(app)
+      .post(`/api/management/companies/${company.id}/delegated-issues`)
+      .send({ title: "Same-company delegated issue", priority: "low" });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.issue).toMatchObject({
+      companyId: company.id,
+      assigneeAgentId: ceo.id,
+      status: "todo",
+    });
+    expect(res.body.access).toMatchObject({ mode: "same_company", grantId: null });
+
+    const auditRows = await db
+      .select({ companyId: activityLog.companyId, action: activityLog.action })
+      .from(activityLog)
+      .where(eq(activityLog.entityId, res.body.issue.id));
+    expect(auditRows.filter((r) => r.action === "issue.delegated")).toEqual([
+      expect.objectContaining({ companyId: company.id, action: "issue.delegated" }),
+    ]);
+    expect(auditRows.some((r) => r.action === "cross_company_issue.delegated")).toBe(false);
+  }, 30_000);
+
+  it("denies a low-trust same-company agent from delegating outside its boundary (no assignment bypass)", async () => {
+    const company = await seedCompany(db, undefined, "LowTrustDeleg");
+    const ceo = await seedAgent(db, company.id, "LowTrustDelegCeo", "idle", "ceo");
+    const lowTrust = await seedAgent(db, company.id, "LowTrustDelegEng", "idle", "engineer", {
+      trustPreset: LOW_TRUST_REVIEW_PRESET,
+      authorizationPolicy: {
+        trustBoundary: {
+          mode: LOW_TRUST_REVIEW_PRESET,
+          projectIds: [],
+          rootIssueId: randomUUID(),
+        },
+      },
+    });
+
+    const app = await createApp(db, {
+      type: "agent",
+      agentId: lowTrust.id,
+      companyId: company.id,
+    });
+
+    // The CEO and a no-project top-level issue are both outside the low-trust
+    // boundary, so delegation must be denied — it cannot be used to bypass the
+    // assignment/low-trust checks that gate normal issue creation.
+    const res = await request(app)
+      .post(`/api/management/companies/${company.id}/delegated-issues`)
+      .send({ title: "Low-trust delegation attempt", assigneeAgentId: ceo.id });
+    expect(res.status).toBe(403);
+
+    const issueCount = await db
+      .select({ id: issues.id })
+      .from(issues)
+      .where(eq(issues.companyId, company.id));
     expect(issueCount).toHaveLength(0);
   }, 30_000);
 });

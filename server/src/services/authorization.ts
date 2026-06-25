@@ -849,7 +849,9 @@ export function authorizationService(db: Db) {
       return lowTrustDeny("Issue is outside this low-trust boundary.");
     }
 
-    if (input.action === "tasks:assign") {
+    // issue:delegate creates + assigns an issue, so it carries the same
+    // low-trust boundary risk as tasks:assign and must be gated identically.
+    if (input.action === "tasks:assign" || input.action === "issue:delegate") {
       if (input.resource.type !== "issue") {
         return lowTrustDeny("Low-trust task assignment is missing an issue resource.");
       }
@@ -1321,6 +1323,17 @@ export function authorizationService(db: Db) {
         });
       }
 
+      // For delegation, the assignee must be an active agent inside the TARGET
+      // company — a delegate grant never lets work be assigned to an agent
+      // outside that company.
+      if (isCrossCompanyDelegateAction && !(await assignmentTargetIsInCompany(input.resource))) {
+        return deny({
+          action: input.action,
+          reason: "deny_company_boundary",
+          explanation: "Delegated issue assignee is not an active agent in the target company.",
+        });
+      }
+
       return allow({
         action: input.action,
         reason: "allow_cross_company_grant",
@@ -1385,18 +1398,13 @@ export function authorizationService(db: Db) {
       });
     }
 
-    // A standard same-company agent that can create issues at all can also use
-    // the bounded delegation endpoint inside its own company. Cross-company use
-    // is gated above by the "delegate" grant.
-    if (input.action === "issue:delegate" && isSimpleAssignableAgentStatus(actorAgent.status)) {
-      return allow({
-        action: input.action,
-        reason: "allow_company_agent",
-        explanation: "Allowed by standard same-company agent delegation.",
-      });
-    }
-
-    if (input.action === "tasks:assign") {
+    // issue:delegate (same-company use of the delegation endpoint) is authorized
+    // through the identical scoped path as tasks:assign — low-trust boundary
+    // (above), assignment-policy, and company-boundary checks all apply. This
+    // prevents the delegation endpoint from becoming a bypass around the normal
+    // assignment authorization. Cross-company use is gated earlier by the
+    // "delegate" grant.
+    if (input.action === "tasks:assign" || input.action === "issue:delegate") {
       if (!isSimpleAssignableAgentStatus(actorAgent.status)) {
         return deny({
           action: input.action,

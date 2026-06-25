@@ -217,29 +217,36 @@ export function managementRoutes(db: Db) {
   });
 
   // Audited cross-organization delegation. A source-company agent holding an
-  // active "delegate" cross-company grant (or any same-company agent) can create
-  // a single bounded issue in the target company and assign it to that company's
-  // CEO (default) or a specified active agent there. This never edits existing
-  // target-company issues, instructions, or config — it only files new work with
-  // a clear owner and an audit trail in both companies.
+  // active "delegate" cross-company grant can create a single bounded issue in
+  // the target company and assign it to that company's CEO (default) or a
+  // specified active agent there. Same-company callers (and instance admins) may
+  // also use it, but are authorized through the SAME scoped assignment checks as
+  // normal issue creation (see issue:delegate in authorization.ts) — this is not
+  // a bypass. It never edits existing target-company issues, instructions, or
+  // config — it only files new work with a clear owner and a two-company audit.
   router.post("/management/companies/:companyId/delegated-issues", async (req, res) => {
     assertBoardOrAgent(req);
     const companyId = req.params.companyId as string;
     const body = managementDelegatedIssueCreateSchema.parse(req.body);
 
-    const decision = await access.decide({
-      actor: req.actor,
-      action: "issue:delegate",
-      resource: { type: "issue", companyId },
-    });
-    if (!decision.allowed) {
-      res.status(403).json({ error: "Cross-company delegation is outside this actor's boundary" });
-      return;
+    // Validate the optional project belongs to the target company.
+    if (body.projectId) {
+      const project = await db
+        .select({ id: projects.id })
+        .from(projects)
+        .where(and(eq(projects.id, body.projectId), eq(projects.companyId, companyId)))
+        .then((rows) => rows[0] ?? null);
+      if (!project) {
+        res.status(404).json({ error: "Project not found in target company" });
+        return;
+      }
     }
 
-    // Resolve the assignee inside the target company. An explicit assignee is
-    // validated by issueService.create (must belong to companyId and be
-    // eligible). When omitted, default to the target company's CEO agent.
+    // Resolve the assignee inside the target company BEFORE authorizing, so the
+    // authorization decision sees the full assignment scope (project + assignee)
+    // and applies the same boundary/policy/low-trust checks as a normal assign.
+    // Explicit assignee is further validated by issueService.create; omitted →
+    // the target company's CEO agent.
     let assigneeAgentId = body.assigneeAgentId ?? null;
     if (!assigneeAgentId) {
       const ceo = await db
@@ -256,16 +263,21 @@ export function managementRoutes(db: Db) {
       assigneeAgentId = ceo.id;
     }
 
-    if (body.projectId) {
-      const project = await db
-        .select({ id: projects.id })
-        .from(projects)
-        .where(and(eq(projects.id, body.projectId), eq(projects.companyId, companyId)))
-        .then((rows) => rows[0] ?? null);
-      if (!project) {
-        res.status(404).json({ error: "Project not found in target company" });
-        return;
-      }
+    const decision = await access.decide({
+      actor: req.actor,
+      action: "issue:delegate",
+      resource: {
+        type: "issue",
+        companyId,
+        projectId: body.projectId ?? null,
+        assigneeAgentId,
+        parentIssueId: null,
+        status: "todo",
+      },
+    });
+    if (!decision.allowed) {
+      res.status(403).json({ error: "Cross-company delegation is outside this actor's boundary" });
+      return;
     }
 
     const actor = getActorInfo(req);
@@ -295,6 +307,12 @@ export function managementRoutes(db: Db) {
       return;
     }
 
+    // Audit is best-effort: the issue (created transactionally above) is the
+    // source of truth. A logging failure must NOT 500 the request, because that
+    // would invite a client retry that creates a duplicate issue. We record the
+    // delegation in both companies for cross-company delegation, or once for a
+    // same-company delegation.
+    const auditAction = isCrossCompany ? "cross_company_issue.delegated" : "issue.delegated";
     const auditDetails = {
       sourceCompanyId,
       targetCompanyId: companyId,
@@ -310,17 +328,24 @@ export function managementRoutes(db: Db) {
       ? [sourceCompanyId, companyId]
       : [companyId];
     for (const auditCompanyId of auditCompanyIds) {
-      await logActivity(db, {
-        companyId: auditCompanyId,
-        actorType: actor.actorType,
-        actorId: actor.actorId,
-        agentId: actor.agentId,
-        runId: actor.runId,
-        action: "cross_company_issue.delegated",
-        entityType: "issue",
-        entityId: created.id,
-        details: auditDetails,
-      });
+      try {
+        await logActivity(db, {
+          companyId: auditCompanyId,
+          actorType: actor.actorType,
+          actorId: actor.actorId,
+          agentId: actor.agentId,
+          runId: actor.runId,
+          action: auditAction,
+          entityType: "issue",
+          entityId: created.id,
+          details: auditDetails,
+        });
+      } catch (err) {
+        console.error(
+          `[delegated-issues] audit log failed for company ${auditCompanyId}, issue ${created.id}`,
+          err,
+        );
+      }
     }
 
     res.status(201).json({
