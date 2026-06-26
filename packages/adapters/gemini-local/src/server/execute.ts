@@ -57,7 +57,7 @@ import {
   isGeminiTransientUnknownApiError,
   parseGeminiJsonl,
 } from "./parse.js";
-import { firstNonEmptyLine } from "./utils.js";
+import { firstMeaningfulErrorLine } from "./utils.js";
 
 const __moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -650,7 +650,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     }
 
     const parsedError = typeof attempt.parsed.errorMessage === "string" ? attempt.parsed.errorMessage.trim() : "";
-    const stderrLine = firstNonEmptyLine(attempt.proc.stderr);
+    const stderrLine = firstMeaningfulErrorLine(attempt.proc.stderr);
     const structuredFailure = attempt.parsed.resultEvent
       ? describeGeminiFailure(attempt.parsed.resultEvent)
       : null;
