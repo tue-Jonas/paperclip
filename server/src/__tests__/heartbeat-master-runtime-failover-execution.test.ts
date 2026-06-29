@@ -52,6 +52,10 @@ vi.mock("../adapters/index.js", () => ({
     };
   },
   listAdapterModelProfiles: async () => [],
+  // secrets.ts normalizes adapter secret fields via findActiveServerAdapter;
+  // returning undefined makes it fall back to the static secret-field list,
+  // which is all this execution-path test needs.
+  findActiveServerAdapter: () => undefined,
   runningProcesses: new Map(),
 }));
 
