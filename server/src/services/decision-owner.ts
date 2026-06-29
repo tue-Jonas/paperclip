@@ -22,6 +22,34 @@ export interface DecisionOwnerResolution {
   commentId?: string | null;
 }
 
+/**
+ * A user can resolve a decision only if they still hold an active, write-capable
+ * (non-viewer) company membership. Viewer memberships are read-only (see
+ * `assertCompanyAccess` in routes/authz.ts), and a missing/inactive membership
+ * cannot accept the interaction/approval the decision owner is locked to. A null
+ * membershipRole is treated as write-capable, matching the authz default.
+ */
+async function hasWriteCapableMembership(db: Db, args: {
+  companyId: string;
+  userId: string;
+}): Promise<boolean> {
+  const membership = await db
+    .select({ membershipRole: companyMemberships.membershipRole })
+    .from(companyMemberships)
+    .where(
+      and(
+        eq(companyMemberships.companyId, args.companyId),
+        eq(companyMemberships.principalType, "user"),
+        eq(companyMemberships.principalId, args.userId),
+        eq(companyMemberships.status, "active"),
+      ),
+    )
+    .then((rows) => rows[0] ?? null);
+
+  if (!membership) return false;
+  return membership.membershipRole !== "viewer";
+}
+
 async function findSourceCommentAuthor(db: Db, args: {
   companyId: string;
   sourceCommentId: string | null | undefined;
@@ -36,9 +64,19 @@ async function findSourceCommentAuthor(db: Db, args: {
     .where(and(eq(issueComments.id, args.sourceCommentId), eq(issueComments.companyId, args.companyId)))
     .then((rows) => rows[0] ?? null);
   const userId = comment ? normalizeUserId(comment.authorUserId) : null;
-  return userId
-    ? { userId, source: "source_comment_author", commentId: comment!.id }
-    : null;
+  if (!userId) return null;
+
+  // The accept/approval path is locked to this exact target user, so an author
+  // who was removed or downgraded to viewer can no longer resolve the decision.
+  // Fall through to the next resolver (current issue creator, then the board
+  // actor / configured default) instead of targeting them.
+  const writeCapable = await hasWriteCapableMembership(db, {
+    companyId: args.companyId,
+    userId,
+  });
+  if (!writeCapable) return null;
+
+  return { userId, source: "source_comment_author", commentId: comment!.id };
 }
 
 async function assertActiveCompanyUser(db: Db, args: {

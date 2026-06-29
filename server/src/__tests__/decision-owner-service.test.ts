@@ -174,6 +174,57 @@ describeEmbeddedPostgres("decision owner resolution", () => {
     });
   });
 
+  it("skips a commenter who is no longer an active member and falls back to the issue creator", async () => {
+    // TWX-1110: the accept/approval path is locked to the resolved decision owner.
+    // A commenter who was removed from the company can no longer resolve it, so we
+    // must fall through to the next resolver (the issue's own creator) instead.
+    const { companyId, rootIssueId } = await seedIssueTree();
+    const sourceCommentId = randomUUID();
+    // "removed-user" authored the triggering comment but has no active membership.
+    await db.insert(issueComments).values({
+      id: sourceCommentId,
+      companyId,
+      issueId: rootIssueId,
+      authorUserId: "removed-user",
+      body: "Send this decision to me.",
+    });
+
+    await expect(resolveDecisionOwnerUserId(db, {
+      companyId,
+      sourceCommentId,
+      issueIds: [rootIssueId],
+      currentUserId: "current-user",
+    })).resolves.toMatchObject({
+      userId: "jonas-user",
+      source: "current_issue_creator",
+    });
+  });
+
+  it("skips a commenter downgraded to viewer and falls back to the issue creator", async () => {
+    // TWX-1110: a viewer membership is read-only and cannot resolve a decision,
+    // so a downgraded commenter must not be targeted as the decision owner.
+    const { companyId, rootIssueId } = await seedIssueTree();
+    const sourceCommentId = randomUUID();
+    await seedActiveCompanyUser(companyId, "viewer-user", "viewer");
+    await db.insert(issueComments).values({
+      id: sourceCommentId,
+      companyId,
+      issueId: rootIssueId,
+      authorUserId: "viewer-user",
+      body: "Send this decision to me.",
+    });
+
+    await expect(resolveDecisionOwnerUserId(db, {
+      companyId,
+      sourceCommentId,
+      issueIds: [rootIssueId],
+      currentUserId: "current-user",
+    })).resolves.toMatchObject({
+      userId: "jonas-user",
+      source: "current_issue_creator",
+    });
+  });
+
   it("falls back to the issue's own creator when no ancestor or commenter resolves", async () => {
     // TWX-1107: the issue creator still wins over the current board actor and the
     // configured default owner when nothing higher-priority resolves.
