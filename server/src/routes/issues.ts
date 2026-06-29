@@ -103,6 +103,10 @@ import {
   taskWatchdogScopeAllowsIssueMutation,
 } from "../services/task-watchdog-scope.js";
 import { resolveRootHumanRequesterFromIssuePath } from "../services/issue-requester.js";
+import {
+  resolvePullRequestAssignee,
+  resolvePullRequestAssigneeForRootRequester,
+} from "../services/pull-request-assignee.js";
 import type { TaskWatchdogServiceDeps, taskWatchdogService } from "../services/task-watchdogs.js";
 import { logger } from "../middleware/logger.js";
 import { conflict, forbidden, HttpError, notFound, unauthorized, unprocessable } from "../errors.js";
@@ -3410,6 +3414,12 @@ export function issueRoutes(
       activeRecoveryAction,
     });
     const rootHumanRequester = resolveRootHumanRequesterFromIssuePath({ issue, ancestors });
+    // TWX-1103: surface the instance-wide PR assignee so an agent that opens the
+    // actual GitHub PR for this tree knows who to assign it to.
+    const pullRequestAssignee = await resolvePullRequestAssigneeForRootRequester(db, {
+      companyId: issue.companyId,
+      rootRequester: rootHumanRequester,
+    });
     const redactLowTrust = await shouldRedactLowTrustForHeartbeatContext(issue, getActorInfo(req));
     const safeWakeComment =
       wakeComment && wakeComment.issueId === issue.id
@@ -3460,6 +3470,7 @@ export function issueRoutes(
         createdByUserId: ancestor.createdByUserId,
       })),
       rootHumanRequester,
+      pullRequestAssignee,
       project: project
         ? {
             id: project.id,
@@ -4651,6 +4662,25 @@ export function issueRoutes(
         issue,
         metadata: req.body.metadata ?? null,
       });
+    }
+    // TWX-1103: stamp the instance-wide PR assignee onto pull_request work
+    // products, derived from the issue tree's rootmost human requester. An
+    // explicit assignee in the request payload is preserved; trees that match no
+    // rule (or whose assignee is not an active company member) are untouched.
+    if (createInput.type === "pull_request") {
+      const existingMetadata =
+        createInput.metadata && typeof createInput.metadata === "object"
+          ? (createInput.metadata as Record<string, unknown>)
+          : null;
+      if (!existingMetadata?.assignee) {
+        const assignee = await resolvePullRequestAssignee(db, {
+          companyId: issue.companyId,
+          issueId: issue.id,
+        });
+        if (assignee) {
+          createInput.metadata = { ...(existingMetadata ?? {}), assignee };
+        }
+      }
     }
     const product = await workProductsSvc.createForIssue(issue.id, issue.companyId, createInput);
     if (!product) {

@@ -60,12 +60,47 @@ export const DEFAULT_BACKUP_RETENTION: BackupRetentionPolicy = {
  */
 export type InstanceExecutionMode = "kubernetes" | "any";
 
+/**
+ * Instance-wide rule that assigns a pull request to a board user when the PR is
+ * produced by an issue tree whose rootmost human requester matches
+ * `rootRequesterUserId`. Resolution is company-scoped and only applies when the
+ * resolved `assigneeUserId` is an active member of the PR's company, so company
+ * boundaries are preserved. See `resolvePullRequestAssignee`.
+ */
+export interface PullRequestAssigneeRule {
+  rootRequesterUserId: string;
+  assigneeUserId: string;
+}
+
+/**
+ * Board user id for Thomas. Embedded so the instance ships an active default PR
+ * assignment rule without requiring DB configuration (see TWX-1103 / TWX-1102).
+ */
+export const THOMAS_BOARD_USER_ID = "oiUyZpjYThWdccgNbKnHQjd7Zy1hl9Xw";
+
+/**
+ * Built-in default applied when an instance has not explicitly configured
+ * `pullRequestAssigneeRules`: PRs from issue trees initiated by Thomas are
+ * assigned to Thomas. Trees initiated by anyone else are left untouched.
+ * Override or disable by setting `pullRequestAssigneeRules` in instance general
+ * settings (an explicit `[]` disables the rule entirely).
+ */
+export const DEFAULT_PULL_REQUEST_ASSIGNEE_RULES: readonly PullRequestAssigneeRule[] = [
+  { rootRequesterUserId: THOMAS_BOARD_USER_ID, assigneeUserId: THOMAS_BOARD_USER_ID },
+];
+
 export interface InstanceGeneralSettings {
   censorUsernameInLogs: boolean;
   keyboardShortcuts: boolean;
   defaultDecisionOwnerUserId: string | null;
   feedbackDataSharingPreference: FeedbackDataSharingPreference;
   backupRetention: BackupRetentionPolicy;
+  /**
+   * Instance-wide PR assignment rules. `null` = use the built-in default
+   * (`DEFAULT_PULL_REQUEST_ASSIGNEE_RULES`); an explicit array (including `[]`)
+   * replaces the default.
+   */
+  pullRequestAssigneeRules: PullRequestAssigneeRule[] | null;
   /**
    * Execution policy. Absent/`"any"` = unrestricted; `"kubernetes"` forces the
    * Kubernetes sandbox provider and denies local/ssh execution.

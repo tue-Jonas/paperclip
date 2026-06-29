@@ -976,6 +976,9 @@ export {
   DEFAULT_TRANSIENT_AGENT_ERROR_AUTO_CLEAR_MAX_ATTEMPTS,
   MIN_TRANSIENT_AGENT_ERROR_AUTO_CLEAR_MAX_ATTEMPTS,
   MAX_TRANSIENT_AGENT_ERROR_AUTO_CLEAR_MAX_ATTEMPTS,
+  DEFAULT_PULL_REQUEST_ASSIGNEE_RULES,
+  THOMAS_BOARD_USER_ID,
+  type PullRequestAssigneeRule,
 } from "./types/instance.js";
 
 export type {
@@ -1004,6 +1007,7 @@ export {
 export {
   instanceSettingsSchema,
   instanceGeneralSettingsSchema,
+  pullRequestAssigneeRuleSchema,
   patchInstanceGeneralSettingsSchema,
   type PatchInstanceGeneralSettings,
   instanceExperimentalSettingsSchema,

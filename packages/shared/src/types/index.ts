@@ -56,6 +56,7 @@ export type {
   InstanceGeneralSettings,
   InstanceSettings,
   BackupRetentionPolicy,
+  PullRequestAssigneeRule,
   IssueGraphLivenessAutoRecoveryPreview,
   IssueGraphLivenessAutoRecoveryPreviewItem,
 } from "./instance.js";
@@ -67,6 +68,8 @@ export {
   DEFAULT_ISSUE_GRAPH_LIVENESS_AUTO_RECOVERY_LOOKBACK_HOURS,
   MIN_ISSUE_GRAPH_LIVENESS_AUTO_RECOVERY_LOOKBACK_HOURS,
   MAX_ISSUE_GRAPH_LIVENESS_AUTO_RECOVERY_LOOKBACK_HOURS,
+  DEFAULT_PULL_REQUEST_ASSIGNEE_RULES,
+  THOMAS_BOARD_USER_ID,
 } from "./instance.js";
 export {
   TRUST_PRESETS,
