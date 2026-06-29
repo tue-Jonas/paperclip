@@ -2915,6 +2915,7 @@ export function issueRoutes(
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
     const assigneeUserFilterRaw = req.query.assigneeUserId as string | undefined;
+    const treeOwnerUserFilterRaw = req.query.treeOwnerUserId as string | undefined;
     const touchedByUserFilterRaw = req.query.touchedByUserId as string | undefined;
     const inboxArchivedByUserFilterRaw = req.query.inboxArchivedByUserId as string | undefined;
     const unreadForUserFilterRaw = req.query.unreadForUserId as string | undefined;
@@ -2922,6 +2923,10 @@ export function issueRoutes(
       assigneeUserFilterRaw === "me" && req.actor.type === "board"
         ? req.actor.userId
         : assigneeUserFilterRaw;
+    const treeOwnerUserId =
+      treeOwnerUserFilterRaw === "me" && req.actor.type === "board"
+        ? req.actor.userId
+        : treeOwnerUserFilterRaw;
     const touchedByUserId =
       touchedByUserFilterRaw === "me" && req.actor.type === "board"
         ? req.actor.userId
@@ -2952,6 +2957,10 @@ export function issueRoutes(
 
     if (assigneeUserFilterRaw === "me" && (!assigneeUserId || req.actor.type !== "board")) {
       res.status(403).json({ error: "assigneeUserId=me requires board authentication" });
+      return;
+    }
+    if (treeOwnerUserFilterRaw === "me" && (!treeOwnerUserId || req.actor.type !== "board")) {
+      res.status(403).json({ error: "treeOwnerUserId=me requires board authentication" });
       return;
     }
     if (touchedByUserFilterRaw === "me" && (!touchedByUserId || req.actor.type !== "board")) {
@@ -3015,6 +3024,9 @@ export function issueRoutes(
       assigneeAgentId,
       participantAgentId: req.query.participantAgentId as string | undefined,
       assigneeUserId,
+      treeOwnerUserId,
+      includeUnownedTrees:
+        req.query.includeUnownedTrees === "true" || req.query.includeUnownedTrees === "1",
       touchedByUserId,
       inboxArchivedByUserId,
       unreadForUserId,
@@ -3089,12 +3101,25 @@ export function issueRoutes(
       return;
     }
 
+    const treeOwnerUserFilterRaw = req.query.treeOwnerUserId as string | undefined;
+    const treeOwnerUserId =
+      treeOwnerUserFilterRaw === "me" && req.actor.type === "board"
+        ? req.actor.userId
+        : treeOwnerUserFilterRaw;
+    if (treeOwnerUserFilterRaw === "me" && (!treeOwnerUserId || req.actor.type !== "board")) {
+      res.status(403).json({ error: "treeOwnerUserId=me requires board authentication" });
+      return;
+    }
+
     const blockedCountFilters = {
       attention: "blocked",
       status: req.query.status as string | string[] | undefined,
       assigneeAgentId: req.query.assigneeAgentId as string | undefined,
       participantAgentId: req.query.participantAgentId as string | undefined,
       assigneeUserId: req.query.assigneeUserId as string | undefined,
+      treeOwnerUserId,
+      includeUnownedTrees:
+        req.query.includeUnownedTrees === "true" || req.query.includeUnownedTrees === "1",
       projectId: req.query.projectId as string | undefined,
       workspaceId: req.query.workspaceId as string | undefined,
       executionWorkspaceId: req.query.executionWorkspaceId as string | undefined,
