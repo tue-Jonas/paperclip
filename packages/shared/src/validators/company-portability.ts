@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isAbsolutePath } from "../absolute-path.js";
 import { MAX_COMPANY_ATTACHMENT_MAX_BYTES } from "../constants.js";
 import {
   issueCommentAuthorTypeSchema,
@@ -42,6 +43,13 @@ export const portabilityCompanyManifestEntrySchema = z.object({
   name: z.string().min(1),
   description: z.string().nullable(),
   brandColor: z.string().nullable(),
+  defaultAgentCwd: z
+    .string()
+    .trim()
+    .min(1)
+    .refine(isAbsolutePath, "Default agent workspace must be an absolute path")
+    .nullable()
+    .default(null),
   logoPath: z.string().nullable(),
   attachmentMaxBytes: z.number().int().min(1).max(MAX_COMPANY_ATTACHMENT_MAX_BYTES).nullable().default(null),
   requireBoardApprovalForNewAgents: z.boolean(),

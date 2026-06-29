@@ -35,6 +35,7 @@ export interface CompanyPortabilityCompanyManifestEntry {
   name: string;
   description: string | null;
   brandColor: string | null;
+  defaultAgentCwd: string | null;
   logoPath: string | null;
   attachmentMaxBytes: number | null;
   requireBoardApprovalForNewAgents: boolean;

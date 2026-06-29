@@ -12,8 +12,6 @@ import { linkSdkInto } from "./link-plugin-dev-sdk.mjs";
 
 const execFileAsync = promisify(execFile);
 
-import { linkSdkInto } from "./link-plugin-dev-sdk.mjs";
-
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..");
 const workspacePath = path.join(repoRoot, "pnpm-workspace.yaml");
@@ -147,11 +145,6 @@ async function prepareAndBuildPackage(pkg) {
       ];
 
     await runCaptured("pnpm", installArgs, pkgDir, log);
-
-    // The fresh install above wipes node_modules and no longer fires a
-    // per-plugin postinstall (removed for supply-chain safety), so link the
-    // in-repo @paperclipai/plugin-sdk that the build's tsc resolves against.
-    linkSdkInto(pkgDir);
 
     // The fresh install above wipes node_modules and no longer fires a
     // per-plugin postinstall (removed for supply-chain safety), so link the

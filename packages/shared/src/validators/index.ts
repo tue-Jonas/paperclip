@@ -26,9 +26,12 @@ export {
   createCompanySchema,
   updateCompanySchema,
   updateCompanyBrandingSchema,
+  updateCompanyByAgentSchema,
+  defaultAgentCwdSchema,
   type CreateCompany,
   type UpdateCompany,
   type UpdateCompanyBranding,
+  type UpdateCompanyByAgent,
 } from "./company.js";
 export {
   managementAnalyzerSnapshotQuerySchema,

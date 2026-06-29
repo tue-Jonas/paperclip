@@ -26,6 +26,9 @@ export const companies = pgTable(
     feedbackDataSharingConsentByUserId: text("feedback_data_sharing_consent_by_user_id"),
     feedbackDataSharingTermsVersion: text("feedback_data_sharing_terms_version"),
     brandColor: text("brand_color"),
+    // Default working directory applied to new agents' adapterConfig.cwd when they
+    // are created/hired without an explicit cwd. Null means "no company default".
+    defaultAgentCwd: text("default_agent_cwd"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

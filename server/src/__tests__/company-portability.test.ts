@@ -3718,4 +3718,109 @@ describe("company portability", () => {
     expect(preview.plan.projectPlans).toHaveLength(0);
     expect(preview.plan.issuePlans).toHaveLength(0);
   });
+
+  it("round-trips the company defaultAgentCwd through export and import", async () => {
+    const portability = companyPortabilityService({} as any);
+    companySvc.getById.mockResolvedValue({
+      id: "company-1",
+      name: "Paperclip",
+      description: null,
+      issuePrefix: "PAP",
+      brandColor: "#5c5fff",
+      logoAssetId: null,
+      logoUrl: null,
+      defaultAgentCwd: "/srv/agents/workbench",
+      requireBoardApprovalForNewAgents: false,
+    });
+    agentSvc.list.mockResolvedValue([]);
+
+    const exported = await portability.exportBundle("company-1", {
+      include: { company: true, agents: true, projects: false, issues: false },
+    });
+    expect(asTextFile(exported.files[".paperclip.yaml"])).toContain(
+      'defaultAgentCwd: "/srv/agents/workbench"',
+    );
+
+    companySvc.create.mockResolvedValue({ id: "company-imported", name: "Paperclip" });
+    accessSvc.ensureMembership.mockResolvedValue(undefined);
+    accessSvc.ensureRoleDefaultGrants.mockResolvedValue(undefined);
+
+    await portability.importBundle(
+      {
+        source: { type: "inline", rootPath: exported.rootPath, files: exported.files },
+        include: { company: true, agents: false, projects: false, issues: false },
+        target: { mode: "new_company", newCompanyName: "Paperclip" },
+        agents: "all",
+        collisionStrategy: "rename",
+      },
+      "user-1",
+    );
+
+    expect(companySvc.create).toHaveBeenCalledWith(
+      expect.objectContaining({ defaultAgentCwd: "/srv/agents/workbench" }),
+    );
+  });
+
+  it("imports a company package that omits defaultAgentCwd as a null default", async () => {
+    const portability = companyPortabilityService({} as any);
+    companySvc.create.mockResolvedValue({ id: "company-imported", name: "Imported" });
+    accessSvc.ensureMembership.mockResolvedValue(undefined);
+    accessSvc.ensureRoleDefaultGrants.mockResolvedValue(undefined);
+    agentSvc.list.mockResolvedValue([]);
+
+    await portability.importBundle(
+      {
+        source: {
+          type: "inline",
+          files: {
+            "COMPANY.md": ["---", "name: Imported", "---", "", "# Imported", ""].join("\n"),
+            ".paperclip.yaml": ["schema: paperclip/v1", "company:", "  brandColor: \"#123456\"", ""].join("\n"),
+          },
+        },
+        include: { company: true, agents: false, projects: false, issues: false },
+        target: { mode: "new_company", newCompanyName: "Imported" },
+        agents: "all",
+        collisionStrategy: "rename",
+      },
+      "user-1",
+    );
+
+    expect(companySvc.create).toHaveBeenCalledWith(
+      expect.objectContaining({ defaultAgentCwd: null }),
+    );
+  });
+
+  it("rejects an imported company manifest with a relative defaultAgentCwd", async () => {
+    const portability = companyPortabilityService({} as any);
+    companySvc.create.mockResolvedValue({ id: "company-imported", name: "Crafted" });
+    accessSvc.ensureMembership.mockResolvedValue(undefined);
+    accessSvc.ensureRoleDefaultGrants.mockResolvedValue(undefined);
+    agentSvc.list.mockResolvedValue([]);
+
+    await expect(
+      portability.importBundle(
+        {
+          source: {
+            type: "inline",
+            files: {
+              "COMPANY.md": ["---", "name: Crafted", "---", "", "# Crafted", ""].join("\n"),
+              ".paperclip.yaml": [
+                "schema: paperclip/v1",
+                "company:",
+                "  defaultAgentCwd: relative/workbench",
+                "",
+              ].join("\n"),
+            },
+          },
+          include: { company: true, agents: false, projects: false, issues: false },
+          target: { mode: "new_company", newCompanyName: "Crafted" },
+          agents: "all",
+          collisionStrategy: "rename",
+        },
+        "user-1",
+      ),
+    ).rejects.toThrow(/absolute path/i);
+
+    expect(companySvc.create).not.toHaveBeenCalled();
+  });
 });

@@ -1,4 +1,5 @@
 export { agentAdapterTypeSchema, optionalAgentAdapterTypeSchema } from "./adapter-type.js";
+export { isAbsolutePath } from "./absolute-path.js";
 export {
   getAgentOrgChainHealth,
   getAgentWorkEligibility,
@@ -1026,6 +1027,8 @@ export {
   createCompanySchema,
   updateCompanySchema,
   updateCompanyBrandingSchema,
+  updateCompanyByAgentSchema,
+  defaultAgentCwdSchema,
   managementAnalyzerSnapshotQuerySchema,
   managementDelegatedIssueCreateSchema,
   managementIssueListQuerySchema,
@@ -1050,6 +1053,7 @@ export {
   type ManagementRunListQuery,
   type UpdateCompany,
   type UpdateCompanyBranding,
+  type UpdateCompanyByAgent,
   type UpsertIssueFeedbackVote,
   type ExternalObjectCanonicalIdentityInput,
   type ExternalObjectMentionSourceInput,
