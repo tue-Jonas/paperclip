@@ -4,6 +4,7 @@ import {
   activityLog,
   agents,
   companies,
+  companyMemberships,
   createDb,
   goals,
   instanceSettings,
@@ -56,6 +57,7 @@ describeEmbeddedPostgres("initiator-aware decision routing events", () => {
     await db.delete(issueThreadInteractions);
     await db.delete(issues);
     await db.delete(goals);
+    await db.delete(companyMemberships);
     await db.delete(instanceSettings);
     await db.delete(agents);
     await db.delete(companies);
@@ -98,6 +100,15 @@ describeEmbeddedPostgres("initiator-aware decision routing events", () => {
       adapterConfig: {},
       runtimeConfig: {},
       permissions: {},
+    });
+    // The root human initiator holds an active, write-capable membership, so the
+    // gated ancestor resolver (TWX-1112) targets them.
+    await db.insert(companyMemberships).values({
+      companyId,
+      principalType: "user",
+      principalId: "jonas-user",
+      status: "active",
+      membershipRole: "owner",
     });
     await db.insert(issues).values({
       id: rootIssueId,

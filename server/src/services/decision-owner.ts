@@ -79,25 +79,22 @@ async function findSourceCommentAuthor(db: Db, args: {
   return { userId, source: "source_comment_author", commentId: comment!.id };
 }
 
-async function assertActiveCompanyUser(db: Db, args: {
+/**
+ * Explicit decision owners are caller-specified, so an invalid target is a
+ * caller error and we fail loudly instead of silently routing elsewhere. This
+ * is the deliberate difference from the inferred resolver paths (ancestor,
+ * comment author, issue creator), which fall through to the next candidate when
+ * theirs cannot resolve. We still apply the same write-capable membership rule
+ * so an explicit viewer/removed user is rejected rather than locked in as an
+ * owner who cannot accept the interaction (TWX-1112).
+ */
+async function assertWriteCapableCompanyUser(db: Db, args: {
   companyId: string;
   userId: string;
 }) {
-  const membership = await db
-    .select({ id: companyMemberships.id })
-    .from(companyMemberships)
-    .where(
-      and(
-        eq(companyMemberships.companyId, args.companyId),
-        eq(companyMemberships.principalType, "user"),
-        eq(companyMemberships.principalId, args.userId),
-        eq(companyMemberships.status, "active"),
-      ),
-    )
-    .then((rows) => rows[0] ?? null);
-
-  if (!membership) {
-    throw badRequest("Explicit decision owner must be an active user in this company");
+  const writeCapable = await hasWriteCapableMembership(db, args);
+  if (!writeCapable) {
+    throw badRequest("Explicit decision owner must be an active, write-capable (non-viewer) user in this company");
   }
 }
 
@@ -127,7 +124,7 @@ export async function resolveDecisionOwnerUserId(db: Db, args: {
 }): Promise<DecisionOwnerResolution> {
   const explicitUserId = normalizeUserId(args.explicitUserId);
   if (explicitUserId) {
-    await assertActiveCompanyUser(db, {
+    await assertWriteCapableCompanyUser(db, {
       companyId: args.companyId,
       userId: explicitUserId,
     });
@@ -140,11 +137,25 @@ export async function resolveDecisionOwnerUserId(db: Db, args: {
   // issue's own creator only ranks below a triggering board commenter, so a
   // board member who explicitly asks for the decision is preferred over the
   // person who happened to file the issue.
+  //
+  // Every inferred human candidate (ancestor, comment author, issue creator)
+  // must still hold an active, write-capable (non-viewer) membership: the
+  // accept/approval path is locked to the resolved owner, so a removed or
+  // read-only candidate cannot resolve the decision. Such candidates fall
+  // through to the next resolver instead of locking the interaction to a user
+  // who cannot act on it (TWX-1110 commenter, TWX-1112 issue creator/ancestor).
   const rootHumanRequester = await findRootHumanRequester(db, {
     companyId: args.companyId,
     issueIds: args.issueIds,
   });
-  if (rootHumanRequester && rootHumanRequester.source === "ancestor") {
+  if (
+    rootHumanRequester
+    && rootHumanRequester.source === "ancestor"
+    && (await hasWriteCapableMembership(db, {
+      companyId: args.companyId,
+      userId: rootHumanRequester.userId,
+    }))
+  ) {
     return {
       userId: rootHumanRequester.userId,
       source: "root_human_requester",
@@ -158,7 +169,14 @@ export async function resolveDecisionOwnerUserId(db: Db, args: {
   });
   if (sourceCommentAuthor) return sourceCommentAuthor;
 
-  if (rootHumanRequester && rootHumanRequester.source === "current_issue") {
+  if (
+    rootHumanRequester
+    && rootHumanRequester.source === "current_issue"
+    && (await hasWriteCapableMembership(db, {
+      companyId: args.companyId,
+      userId: rootHumanRequester.userId,
+    }))
+  ) {
     return {
       userId: rootHumanRequester.userId,
       source: "current_issue_creator",
