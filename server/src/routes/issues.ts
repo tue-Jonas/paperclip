@@ -4883,6 +4883,33 @@ export function issueRoutes(
         return;
       }
     }
+    // TWX-1109: the instance-wide PR-assignee invariant must also hold when a
+    // work product is updated INTO or AS a pull_request (e.g. a branch promoted
+    // to a PR, or a PR whose metadata is replaced) — not just at creation. Stamp
+    // the assignee when the post-update work product is a pull_request that
+    // carries no explicit assignee. An explicit assignee — supplied in this
+    // patch's metadata, or already on the existing record's retained metadata —
+    // is preserved.
+    const effectiveType = patch.type ?? existing.type;
+    if (effectiveType === "pull_request") {
+      const metadataInPatch = Object.prototype.hasOwnProperty.call(patch, "metadata");
+      const effectiveMetadata = metadataInPatch
+        ? patch.metadata && typeof patch.metadata === "object"
+          ? (patch.metadata as Record<string, unknown>)
+          : null
+        : existing.metadata && typeof existing.metadata === "object"
+          ? (existing.metadata as Record<string, unknown>)
+          : null;
+      if (!effectiveMetadata?.assignee) {
+        const assignee = await resolvePullRequestAssignee(db, {
+          companyId: issue.companyId,
+          issueId: issue.id,
+        });
+        if (assignee) {
+          patch.metadata = { ...(effectiveMetadata ?? {}), assignee };
+        }
+      }
+    }
     const sourceTrust = await sourceTrustForActorWrite(issue, actor);
     const product = await workProductsSvc.update(id, {
       ...patch,

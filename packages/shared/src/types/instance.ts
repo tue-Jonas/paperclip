@@ -66,28 +66,15 @@ export type InstanceExecutionMode = "kubernetes" | "any";
  * `rootRequesterUserId`. Resolution is company-scoped and only applies when the
  * resolved `assigneeUserId` is an active member of the PR's company, so company
  * boundaries are preserved. See `resolvePullRequestAssignee`.
+ *
+ * This type is instance-agnostic. The shipped instance default (and any
+ * specific board-user ids) lives in the server config/default layer
+ * (`server/src/services/pull-request-assignee.ts`), not in this shared package.
  */
 export interface PullRequestAssigneeRule {
   rootRequesterUserId: string;
   assigneeUserId: string;
 }
-
-/**
- * Board user id for Thomas. Embedded so the instance ships an active default PR
- * assignment rule without requiring DB configuration (see TWX-1103 / TWX-1102).
- */
-export const THOMAS_BOARD_USER_ID = "oiUyZpjYThWdccgNbKnHQjd7Zy1hl9Xw";
-
-/**
- * Built-in default applied when an instance has not explicitly configured
- * `pullRequestAssigneeRules`: PRs from issue trees initiated by Thomas are
- * assigned to Thomas. Trees initiated by anyone else are left untouched.
- * Override or disable by setting `pullRequestAssigneeRules` in instance general
- * settings (an explicit `[]` disables the rule entirely).
- */
-export const DEFAULT_PULL_REQUEST_ASSIGNEE_RULES: readonly PullRequestAssigneeRule[] = [
-  { rootRequesterUserId: THOMAS_BOARD_USER_ID, assigneeUserId: THOMAS_BOARD_USER_ID },
-];
 
 export interface InstanceGeneralSettings {
   censorUsernameInLogs: boolean;
@@ -96,9 +83,8 @@ export interface InstanceGeneralSettings {
   feedbackDataSharingPreference: FeedbackDataSharingPreference;
   backupRetention: BackupRetentionPolicy;
   /**
-   * Instance-wide PR assignment rules. `null` = use the built-in default
-   * (`DEFAULT_PULL_REQUEST_ASSIGNEE_RULES`); an explicit array (including `[]`)
-   * replaces the default.
+   * Instance-wide PR assignment rules. `null` = use the server-side built-in
+   * default rules; an explicit array (including `[]`) replaces the default.
    */
   pullRequestAssigneeRules: PullRequestAssigneeRule[] | null;
   /**

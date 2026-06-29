@@ -2,7 +2,6 @@ import { and, eq } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { companyMemberships } from "@paperclipai/db";
 import {
-  DEFAULT_PULL_REQUEST_ASSIGNEE_RULES,
   pullRequestAssigneeRuleSchema,
   type IssueRootHumanRequester,
   type PullRequestAssigneeRule,
@@ -13,6 +12,25 @@ import { issueRequesterService } from "./issue-requester.js";
 import { normalizeUserId } from "./user-ids.js";
 
 export type PullRequestAssigneeSource = "issue_tree_root_requester_rule";
+
+/**
+ * Board user id for Thomas. Kept in the server config/default layer — never in
+ * the instance-agnostic `@paperclipai/shared` package — so a specific person's
+ * id is not baked into a reusable type package. See TWX-1109.
+ */
+export const THOMAS_BOARD_USER_ID = "oiUyZpjYThWdccgNbKnHQjd7Zy1hl9Xw";
+
+/**
+ * Built-in instance default applied when `pullRequestAssigneeRules` is not
+ * explicitly configured (neither instance settings nor the
+ * `PAPERCLIP_PR_ASSIGNEE_RULES` env override): PRs from issue trees initiated by
+ * Thomas are assigned to Thomas. Trees initiated by anyone else are left
+ * untouched. Override or disable via instance general settings (an explicit
+ * `[]` disables the rule entirely). See TWX-1103 / TWX-1102.
+ */
+export const DEFAULT_PULL_REQUEST_ASSIGNEE_RULES: readonly PullRequestAssigneeRule[] = [
+  { rootRequesterUserId: THOMAS_BOARD_USER_ID, assigneeUserId: THOMAS_BOARD_USER_ID },
+];
 
 export interface PullRequestAssigneeResolution {
   /** Board user the PR should be assigned to. */

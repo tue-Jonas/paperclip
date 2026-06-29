@@ -8,12 +8,15 @@ import {
   instanceSettings,
   issues,
 } from "@paperclipai/db";
-import { DEFAULT_PULL_REQUEST_ASSIGNEE_RULES, THOMAS_BOARD_USER_ID } from "@paperclipai/shared";
 import {
   getEmbeddedPostgresTestSupport,
   startEmbeddedPostgresTestDatabase,
 } from "./helpers/embedded-postgres.js";
-import { resolvePullRequestAssignee } from "../services/pull-request-assignee.js";
+import {
+  DEFAULT_PULL_REQUEST_ASSIGNEE_RULES,
+  resolvePullRequestAssignee,
+  THOMAS_BOARD_USER_ID,
+} from "../services/pull-request-assignee.js";
 import { instanceSettingsService } from "../services/instance-settings.js";
 
 const embeddedPostgresSupport = await getEmbeddedPostgresTestSupport();
