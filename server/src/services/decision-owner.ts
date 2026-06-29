@@ -10,6 +10,7 @@ export type DecisionOwnerResolutionSource =
   | "explicit_user"
   | "source_comment_author"
   | "root_human_requester"
+  | "current_issue_creator"
   | "current_board_actor"
   | "configured_default_board_owner"
   | "none";
@@ -65,15 +66,8 @@ async function assertActiveCompanyUser(db: Db, args: {
 async function findRootHumanRequester(db: Db, args: {
   companyId: string;
   issueIds?: string[];
-}): Promise<DecisionOwnerResolution | null> {
-  const resolution = await issueRequesterService(db).resolveRootHumanRequesterForIssues(args);
-  return resolution
-    ? {
-        userId: resolution.userId,
-        source: "root_human_requester",
-        issueId: resolution.issueId,
-      }
-    : null;
+}) {
+  return issueRequesterService(db).resolveRootHumanRequesterForIssues(args);
 }
 
 async function findConfiguredDefaultOwner(db: Db): Promise<DecisionOwnerResolution | null> {
@@ -102,17 +96,37 @@ export async function resolveDecisionOwnerUserId(db: Db, args: {
     return { userId: explicitUserId, source: "explicit_user" };
   }
 
+  // Initiator resolution order (TWX-1107). The parent-chain originator always
+  // wins so agent-created child issues route decisions back to the human who
+  // initiated the tree, never the intermediate agent or default owner. The
+  // issue's own creator only ranks below a triggering board commenter, so a
+  // board member who explicitly asks for the decision is preferred over the
+  // person who happened to file the issue.
   const rootHumanRequester = await findRootHumanRequester(db, {
     companyId: args.companyId,
     issueIds: args.issueIds,
   });
-  if (rootHumanRequester) return rootHumanRequester;
+  if (rootHumanRequester && rootHumanRequester.source === "ancestor") {
+    return {
+      userId: rootHumanRequester.userId,
+      source: "root_human_requester",
+      issueId: rootHumanRequester.issueId,
+    };
+  }
 
   const sourceCommentAuthor = await findSourceCommentAuthor(db, {
     companyId: args.companyId,
     sourceCommentId: args.sourceCommentId,
   });
   if (sourceCommentAuthor) return sourceCommentAuthor;
+
+  if (rootHumanRequester && rootHumanRequester.source === "current_issue") {
+    return {
+      userId: rootHumanRequester.userId,
+      source: "current_issue_creator",
+      issueId: rootHumanRequester.issueId,
+    };
+  }
 
   const currentUserId = normalizeUserId(args.currentUserId);
   if (currentUserId) {

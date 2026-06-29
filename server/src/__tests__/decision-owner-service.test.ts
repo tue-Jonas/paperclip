@@ -148,6 +148,47 @@ describeEmbeddedPostgres("decision owner resolution", () => {
     });
   });
 
+  it("prefers a triggering board commenter over the issue's own creator", async () => {
+    // TWX-1107: when an issue has a human creator but no human ancestor, a board
+    // member who explicitly comments to request the decision must outrank the
+    // person who merely filed the issue.
+    const { companyId, rootIssueId } = await seedIssueTree();
+    const sourceCommentId = randomUUID();
+    await seedActiveCompanyUser(companyId, "thomas-user");
+    await db.insert(issueComments).values({
+      id: sourceCommentId,
+      companyId,
+      issueId: rootIssueId,
+      authorUserId: "thomas-user",
+      body: "Send this decision to me.",
+    });
+
+    await expect(resolveDecisionOwnerUserId(db, {
+      companyId,
+      sourceCommentId,
+      issueIds: [rootIssueId],
+      currentUserId: "current-user",
+    })).resolves.toMatchObject({
+      userId: "thomas-user",
+      source: "source_comment_author",
+    });
+  });
+
+  it("falls back to the issue's own creator when no ancestor or commenter resolves", async () => {
+    // TWX-1107: the issue creator still wins over the current board actor and the
+    // configured default owner when nothing higher-priority resolves.
+    const { companyId, rootIssueId } = await seedIssueTree();
+
+    await expect(resolveDecisionOwnerUserId(db, {
+      companyId,
+      issueIds: [rootIssueId],
+      currentUserId: "current-user",
+    })).resolves.toMatchObject({
+      userId: "jonas-user",
+      source: "current_issue_creator",
+    });
+  });
+
   it("falls back to current board actor and configured default owner", async () => {
     const companyId = randomUUID();
     await db.insert(companies).values({
