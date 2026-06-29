@@ -1,4 +1,5 @@
 export { agentAdapterTypeSchema, optionalAgentAdapterTypeSchema } from "./adapter-type.js";
+export { isAbsolutePath } from "./absolute-path.js";
 export {
   getAgentOrgChainHealth,
   getAgentWorkEligibility,

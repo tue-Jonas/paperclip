@@ -44,6 +44,7 @@ import {
   ROUTINE_TRIGGER_SIGNING_MODES,
   deriveProjectUrlKey,
   envConfigSchema,
+  isAbsolutePath,
   issueCommentAuthorTypeSchema,
   issueCommentMetadataSchema,
   issueCommentPresentationSchema,
@@ -716,6 +717,22 @@ function asString(value: unknown): string | null {
 
 function asBoolean(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
+}
+
+// Imported manifests are assembled from package files and never pass through the
+// company create/update validators, so a crafted manifest could otherwise persist
+// a relative defaultAgentCwd that new agents would inherit as an invalid cwd.
+// Reject any non-absolute value before it reaches companyService.create/update.
+function resolveImportedDefaultAgentCwd(value: string | null | undefined): string | null {
+  if (value == null) return null;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+  if (!isAbsolutePath(trimmed)) {
+    throw unprocessable(
+      `Imported company default agent workspace must be an absolute path: ${trimmed}`,
+    );
+  }
+  return trimmed;
 }
 
 function asInteger(value: unknown): number | null {
@@ -4328,7 +4345,9 @@ export function companyPortabilityService(db: Db, storage?: StorageService) {
         name: companyName,
         description: include.company ? (sourceManifest.company?.description ?? null) : null,
         brandColor: include.company ? (sourceManifest.company?.brandColor ?? null) : null,
-        defaultAgentCwd: include.company ? (sourceManifest.company?.defaultAgentCwd ?? null) : null,
+        defaultAgentCwd: include.company
+          ? resolveImportedDefaultAgentCwd(sourceManifest.company?.defaultAgentCwd)
+          : null,
         attachmentMaxBytes: include.company
           ? (sourceManifest.company?.attachmentMaxBytes ?? undefined)
           : undefined,
@@ -4370,7 +4389,7 @@ export function companyPortabilityService(db: Db, storage?: StorageService) {
           name: sourceManifest.company.name,
           description: sourceManifest.company.description,
           brandColor: sourceManifest.company.brandColor,
-          defaultAgentCwd: sourceManifest.company.defaultAgentCwd ?? null,
+          defaultAgentCwd: resolveImportedDefaultAgentCwd(sourceManifest.company.defaultAgentCwd),
           attachmentMaxBytes: sourceManifest.company.attachmentMaxBytes ?? undefined,
           requireBoardApprovalForNewAgents: sourceManifest.company.requireBoardApprovalForNewAgents,
           feedbackDataSharingEnabled: sourceManifest.company.feedbackDataSharingEnabled,

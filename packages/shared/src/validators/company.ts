@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isAbsolutePath } from "../absolute-path.js";
 import {
   COMPANY_STATUSES,
   MAX_COMPANY_ATTACHMENT_MAX_BYTES,
@@ -15,12 +16,17 @@ const attachmentMaxBytesSchema = z
 
 // Company-level default agent working directory. New agents inherit this into
 // adapterConfig.cwd unless they are created with an explicit cwd. Must be an
-// absolute path; null clears the default.
+// absolute path — POSIX ("/workbench") or Windows drive-letter ("C:\\workbench").
+//
+// null vs undefined semantics (this schema is `.nullable().optional()`):
+//   - a non-empty absolute string sets the default
+//   - `null` explicitly clears the default
+//   - `undefined` (field omitted) leaves the existing value unchanged on update
 export const defaultAgentCwdSchema = z
   .string()
   .trim()
   .min(1)
-  .startsWith("/", "Default agent workspace must be an absolute path")
+  .refine(isAbsolutePath, "Default agent workspace must be an absolute path")
   .nullable()
   .optional();
 

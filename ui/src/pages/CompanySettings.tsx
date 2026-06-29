@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   DEFAULT_COMPANY_ATTACHMENT_MAX_BYTES,
   MAX_COMPANY_ATTACHMENT_MAX_BYTES,
+  isAbsolutePath,
 } from "@paperclipai/shared";
 import { useCompany } from "../context/CompanyContext";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
@@ -62,7 +63,7 @@ export function CompanySettings() {
   const cloudSyncEnabled = experimentalSettings?.enableCloudSync === true;
 
   const normalizedDefaultAgentCwd = defaultAgentCwd.trim();
-  const defaultAgentCwdValid = normalizedDefaultAgentCwd === "" || normalizedDefaultAgentCwd.startsWith("/");
+  const defaultAgentCwdValid = normalizedDefaultAgentCwd === "" || isAbsolutePath(normalizedDefaultAgentCwd);
 
   const generalDirty =
     !!selectedCompany &&
@@ -345,7 +346,7 @@ export function CompanySettings() {
                   />
                   {!defaultAgentCwdValid && (
                     <span className="text-xs text-destructive">
-                      Must be an absolute path (start with /).
+                      Must be an absolute path (e.g. /home/tj/workbench or C:\workbench).
                     </span>
                   )}
                 </div>
