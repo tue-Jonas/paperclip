@@ -213,6 +213,7 @@ function portabilityExport(): CompanyPortabilityExportResult {
         name: "Local Company",
         description: null,
         brandColor: null,
+        defaultAgentCwd: null,
         logoPath: null,
         attachmentMaxBytes: null,
         requireBoardApprovalForNewAgents: false,
