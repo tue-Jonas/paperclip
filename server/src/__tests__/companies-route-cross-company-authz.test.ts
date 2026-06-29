@@ -290,7 +290,7 @@ describe.sequential("company route cross-company authorization", () => {
     expect(remove.body.error).toContain("Board access required");
   });
 
-  it("covers board actor access for non-member, viewer, active member, local trusted board, and instance admin without target membership", async () => {
+  it("covers board actor access for non-member, viewer, active member, local trusted board, and instance admin granted cross-company access", async () => {
     const nonMemberApp = await createApp(boardActor({ userId: "outsider" }));
     const nonMember = await request(nonMemberApp).get(`/api/companies/${companyBId}`);
     expect(nonMember.status).toBe(403);
@@ -336,18 +336,20 @@ describe.sequential("company route cross-company authorization", () => {
     await request(localTrustedApp).get(`/api/companies/${companyBId}`).expect(200);
     await request(localTrustedApp).patch(`/api/companies/${companyBId}`).send({ description: "Local" }).expect(200);
 
+    // Fork divergence (TWX-695): outside cloud-tenant mode a signed-in instance
+    // admin is the deployment owner and has full cross-company access, even
+    // without an explicit membership on the target company. This intentionally
+    // differs from upstream's cloud-scoped model. See authz-company-access.test.ts
+    // ("allows instance admins without company memberships") and authz.ts
+    // assertCompanyAccess (source !== "cloud_tenant" && isInstanceAdmin → allow).
     vi.clearAllMocks();
     resetMockDefaults();
     const adminWithoutMembershipApp = await createApp(boardActor({
       userId: "instance-admin",
       isInstanceAdmin: true,
     }));
-    const adminRead = await request(adminWithoutMembershipApp).get(`/api/companies/${companyBId}`);
-    expect(adminRead.status).toBe(403);
-    expect(adminRead.body.error).toContain("access to this company");
-    const adminWrite = await request(adminWithoutMembershipApp).patch(`/api/companies/${companyBId}`).send({ description: "Admin" });
-    expect(adminWrite.status).toBe(403);
-    expect(adminWrite.body.error).toContain("access to this company");
-    assertNoTargetMutationSideEffects();
+    await request(adminWithoutMembershipApp).get(`/api/companies/${companyBId}`).expect(200);
+    await request(adminWithoutMembershipApp).patch(`/api/companies/${companyBId}`).send({ description: "Admin" }).expect(200);
+    expect(mockCompanyService.update).toHaveBeenCalledTimes(1);
   });
 });
