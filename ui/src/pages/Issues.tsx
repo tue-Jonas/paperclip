@@ -168,7 +168,10 @@ export function Issues() {
       workspaceIdFilter ?? "__all__",
       "with-routine-executions",
       "tree-owner",
-      treeOwnerFilterActive ? "me" : "__all__",
+      // Key by the concrete user id (not the literal "me") so switching board
+      // sessions without a full reload refetches instead of reusing the prior
+      // user's filtered dataset (TWX-1080 review).
+      treeOwnerFilterActive ? (currentUserId ?? "me") : "__all__",
       "infinite",
       issuePageSize,
     ],

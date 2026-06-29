@@ -3101,6 +3101,15 @@ export function issueRoutes(
       return;
     }
 
+    const assigneeUserFilterRaw = req.query.assigneeUserId as string | undefined;
+    const assigneeUserId =
+      assigneeUserFilterRaw === "me" && req.actor.type === "board"
+        ? req.actor.userId
+        : assigneeUserFilterRaw;
+    if (assigneeUserFilterRaw === "me" && (!assigneeUserId || req.actor.type !== "board")) {
+      res.status(403).json({ error: "assigneeUserId=me requires board authentication" });
+      return;
+    }
     const treeOwnerUserFilterRaw = req.query.treeOwnerUserId as string | undefined;
     const treeOwnerUserId =
       treeOwnerUserFilterRaw === "me" && req.actor.type === "board"
@@ -3116,7 +3125,7 @@ export function issueRoutes(
       status: req.query.status as string | string[] | undefined,
       assigneeAgentId: req.query.assigneeAgentId as string | undefined,
       participantAgentId: req.query.participantAgentId as string | undefined,
-      assigneeUserId: req.query.assigneeUserId as string | undefined,
+      assigneeUserId,
       treeOwnerUserId,
       includeUnownedTrees:
         req.query.includeUnownedTrees === "true" || req.query.includeUnownedTrees === "1",
