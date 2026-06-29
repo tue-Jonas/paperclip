@@ -17,5 +17,6 @@ describe("work mode metadata", () => {
   it("matches standard mode tooltip copy to the active surface", () => {
     expect(titleForPendingWorkMode("standard", false)).toBe("Standard mode for this submission. Click to change.");
     expect(titleForPendingWorkMode("standard", true)).toBe("Agent mode for this submission. Click to change.");
+    expect(titleForPendingWorkMode("planning", true)).toBe("Plan mode is on for this submission. Click to change.");
   });
 });

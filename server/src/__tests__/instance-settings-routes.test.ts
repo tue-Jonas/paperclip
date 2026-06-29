@@ -88,6 +88,28 @@ describe("instance settings routes", () => {
       createdAt: "2026-06-20T00:00:00.000Z",
       updatedAt: "2026-06-20T00:00:00.000Z",
     });
+    mockInstanceSettingsService.get.mockResolvedValue({
+      id: "instance-settings-1",
+      defaultEnvironmentId: null,
+      general: {
+        censorUsernameInLogs: false,
+        keyboardShortcuts: false,
+        feedbackDataSharingPreference: "prompt",
+      },
+      experimental: {
+        enableEnvironments: false,
+        enableIsolatedWorkspaces: false,
+        enableIssuePlanDecompositions: false,
+        enableExperimentalFileViewer: false,
+        enableCloudSync: false,
+        enableServerInfoDebugView: false,
+        autoRestartDevServerWhenIdle: false,
+        enableIssueGraphLivenessAutoRecovery: true,
+        issueGraphLivenessAutoRecoveryLookbackHours: 24,
+      },
+      createdAt: "2026-06-20T00:00:00.000Z",
+      updatedAt: "2026-06-20T00:00:00.000Z",
+    });
     mockInstanceSettingsService.getGeneral.mockResolvedValue({
       censorUsernameInLogs: false,
       keyboardShortcuts: false,
@@ -101,6 +123,8 @@ describe("instance settings routes", () => {
       enableExperimentalFileViewer: false,
       enableTaskWatchdogs: false,
       enableCloudSync: false,
+      enableExternalObjects: false,
+      enableServerInfoDebugView: false,
       autoRestartDevServerWhenIdle: false,
       enableIssueGraphLivenessAutoRecovery: true,
       issueGraphLivenessAutoRecoveryLookbackHours: 24,
@@ -126,6 +150,28 @@ describe("instance settings routes", () => {
       createdAt: "2026-06-20T00:00:00.000Z",
       updatedAt: "2026-06-20T01:00:00.000Z",
     });
+    mockInstanceSettingsService.update.mockResolvedValue({
+      id: "instance-settings-1",
+      defaultEnvironmentId: "env-1",
+      general: {
+        censorUsernameInLogs: false,
+        keyboardShortcuts: false,
+        feedbackDataSharingPreference: "prompt",
+      },
+      experimental: {
+        enableEnvironments: true,
+        enableIsolatedWorkspaces: true,
+        enableIssuePlanDecompositions: true,
+        enableExperimentalFileViewer: true,
+        enableCloudSync: true,
+        enableServerInfoDebugView: false,
+        autoRestartDevServerWhenIdle: false,
+        enableIssueGraphLivenessAutoRecovery: true,
+        issueGraphLivenessAutoRecoveryLookbackHours: 24,
+      },
+      createdAt: "2026-06-20T00:00:00.000Z",
+      updatedAt: "2026-06-20T01:00:00.000Z",
+    });
     mockInstanceSettingsService.updateGeneral.mockResolvedValue({
       id: "instance-settings-1",
       general: {
@@ -144,6 +190,8 @@ describe("instance settings routes", () => {
         enableExperimentalFileViewer: true,
         enableTaskWatchdogs: true,
         enableCloudSync: true,
+        enableExternalObjects: false,
+        enableServerInfoDebugView: true,
         autoRestartDevServerWhenIdle: false,
         enableIssueGraphLivenessAutoRecovery: true,
         issueGraphLivenessAutoRecoveryLookbackHours: 24,
@@ -196,6 +244,8 @@ describe("instance settings routes", () => {
       enableExperimentalFileViewer: false,
       enableTaskWatchdogs: false,
       enableCloudSync: false,
+      enableExternalObjects: false,
+      enableServerInfoDebugView: false,
       autoRestartDevServerWhenIdle: false,
       enableIssueGraphLivenessAutoRecovery: true,
       issueGraphLivenessAutoRecoveryLookbackHours: 24,
@@ -271,6 +321,42 @@ describe("instance settings routes", () => {
         ([patch]) => patch?.autoRestartDevServerWhenIdle === true,
       ),
     ).toBe(true);
+  });
+
+  it("allows local board users to update external object detection", async () => {
+    const app = await createApp({
+      type: "board",
+      userId: "local-board",
+      source: "local_implicit",
+      isInstanceAdmin: true,
+    });
+
+    await request(app)
+      .patch("/api/instance/settings/experimental")
+      .send({ enableExternalObjects: true })
+      .expect(200);
+
+    expect(mockInstanceSettingsService.updateExperimental).toHaveBeenCalledWith({
+      enableExternalObjects: true,
+    });
+  });
+
+  it("allows local board users to update the server info debug view", async () => {
+    const app = await createApp({
+      type: "board",
+      userId: "local-board",
+      source: "local_implicit",
+      isInstanceAdmin: true,
+    });
+
+    await request(app)
+      .patch("/api/instance/settings/experimental")
+      .send({ enableServerInfoDebugView: true })
+      .expect(200);
+
+    expect(mockInstanceSettingsService.updateExperimental).toHaveBeenCalledWith({
+      enableServerInfoDebugView: true,
+    });
   });
 
   it("allows local board users to update issue graph liveness auto-recovery", async () => {

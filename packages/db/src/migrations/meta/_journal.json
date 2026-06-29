@@ -764,6 +764,139 @@
       "when": 1782080000000,
       "tag": "0108_cross_company_grant_lifetime",
       "breakpoints": true
+    },
+    {
+      "idx": 109,
+      "version": "7",
+      "when": 1782080100000,
+      "tag": "0109_external_object_references",
+      "breakpoints": true
+    },
+    {
+      "idx": 110,
+      "version": "7",
+      "when": 1782080200000,
+      "tag": "0110_external_object_display_metadata",
+      "breakpoints": true
+    },
+    {
+      "idx": 111,
+      "version": "7",
+      "when": 1782080300000,
+      "tag": "0111_workspace_operations_issue_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "7",
+      "when": 1782080400000,
+      "tag": "0112_routine_description_annotations",
+      "breakpoints": true
+    },
+    {
+      "idx": 113,
+      "version": "7",
+      "when": 1782080500000,
+      "tag": "0113_document_company_cascade",
+      "breakpoints": true
+    },
+    {
+      "idx": 114,
+      "version": "7",
+      "when": 1782080600000,
+      "tag": "0114_backfill_skill_create_human_defaults",
+      "breakpoints": true
+    },
+    {
+      "idx": 115,
+      "version": "7",
+      "when": 1782080700000,
+      "tag": "0115_rename_skill_create_permission_key",
+      "breakpoints": true
+    },
+    {
+      "idx": 116,
+      "version": "7",
+      "when": 1782080800000,
+      "tag": "0116_pipeline_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 117,
+      "version": "7",
+      "when": 1782080900000,
+      "tag": "0117_pipeline_case_issue_unlinked_event",
+      "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "7",
+      "when": 1782081000000,
+      "tag": "0118_pipeline_routine_origin",
+      "breakpoints": true
+    },
+    {
+      "idx": 119,
+      "version": "7",
+      "when": 1782081100000,
+      "tag": "0119_pipeline_upstream_drift_event",
+      "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "7",
+      "when": 1782081200000,
+      "tag": "0120_pipeline_transition_forced_event",
+      "breakpoints": true
+    },
+    {
+      "idx": 121,
+      "version": "7",
+      "when": 1782081300000,
+      "tag": "0121_pipeline_case_agent_fanout",
+      "breakpoints": true
+    },
+    {
+      "idx": 122,
+      "version": "7",
+      "when": 1782081400000,
+      "tag": "0122_pipeline_drift_acknowledged_event",
+      "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "7",
+      "when": 1782081500000,
+      "tag": "0123_pipeline_stage_working_primitives",
+      "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "7",
+      "when": 1782081600000,
+      "tag": "0124_pipeline_automation_retry_effects",
+      "breakpoints": true
+    },
+    {
+      "idx": 125,
+      "version": "7",
+      "when": 1782081700000,
+      "tag": "0125_pipeline_case_documents",
+      "breakpoints": true
+    },
+    {
+      "idx": 126,
+      "version": "7",
+      "when": 1782081800000,
+      "tag": "0126_document_annotation_source_trust",
+      "breakpoints": true
+    },
+    {
+      "idx": 127,
+      "version": "7",
+      "when": 1782081900000,
+      "tag": "0127_agent_api_key_scope_config",
+      "breakpoints": true
     }
   ]
 }

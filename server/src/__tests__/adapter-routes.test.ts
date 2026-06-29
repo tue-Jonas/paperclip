@@ -115,12 +115,14 @@ describe("adapter routes", () => {
     adapterRoutes = routes.adapterRoutes;
     errorHandler = middleware.errorHandler;
     setOverridePaused("claude_local", false);
+    unregisterServerAdapter("hermes_local");
     unregisterServerAdapter("claude_local");
     registerServerAdapter(overridingConfigSchemaAdapter);
   });
 
   afterEach(() => {
     setOverridePaused("claude_local", false);
+    unregisterServerAdapter("hermes_local");
     unregisterServerAdapter("claude_local");
   });
 
@@ -185,13 +187,11 @@ describe("adapter routes", () => {
       requiresMaterializedRuntimeSkills: true,
     });
 
-    // hermes_local currently supports skills + local JWT, but not the managed
-    // instructions bundle flow because the bundled adapter does not consume
-    // instructionsFilePath at runtime.
-    const hermesAdapter = res.body.find((a: any) => a.type === "hermes_local");
-    expect(hermesAdapter).toBeDefined();
-    expect(hermesAdapter.capabilities).toMatchObject({
-      supportsInstructionsBundle: false,
+    const hermesLocal = res.body.find((a: any) => a.type === "hermes_local");
+    expect(hermesLocal).toBeDefined();
+    expect(hermesLocal.source).toBe("builtin");
+    expect(hermesLocal.capabilities).toMatchObject({
+      supportsInstructionsBundle: true,
       supportsSkills: true,
       supportsLocalAgentJwt: true,
       requiresMaterializedRuntimeSkills: false,
@@ -206,6 +206,16 @@ describe("adapter routes", () => {
       supportsLocalAgentJwt: false,
       requiresMaterializedRuntimeSkills: false,
       supportsModelProfiles: true,
+    });
+
+    const hermesGateway = res.body.find((a: any) => a.type === "hermes_gateway");
+    expect(hermesGateway).toBeDefined();
+    expect(hermesGateway.source).toBe("builtin");
+    expect(hermesGateway.capabilities).toMatchObject({
+      supportsInstructionsBundle: false,
+      supportsSkills: false,
+      supportsLocalAgentJwt: false,
+      requiresMaterializedRuntimeSkills: false,
     });
   });
 
@@ -286,6 +296,28 @@ describe("adapter routes", () => {
     expect(keys).not.toContain("instructionsFilePath");
     expect(keys).not.toContain("promptTemplate");
     expect(keys).not.toContain("bootstrapPromptTemplate");
+  });
+
+  it("serves built-in Hermes config schemas", async () => {
+    const app = createApp();
+
+    const local = await request(app).get("/api/adapters/hermes_local/config-schema");
+    expect(local.status, JSON.stringify(local.body)).toBe(200);
+    expect(local.body.fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: "provider" }),
+        expect.objectContaining({ key: "timeoutSec" }),
+      ]),
+    );
+
+    const gateway = await request(app).get("/api/adapters/hermes_gateway/config-schema");
+    expect(gateway.status, JSON.stringify(gateway.body)).toBe(200);
+    expect(gateway.body.fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: "apiBaseUrl", required: true }),
+        expect.objectContaining({ key: "apiKey", required: true }),
+      ]),
+    );
   });
 
   it("GET /api/adapters includes ACPX model availability", async () => {

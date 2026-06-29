@@ -40,7 +40,7 @@ import {
 } from "@paperclipai/shared";
 import { conflict, forbidden, notFound, unprocessable } from "../errors.js";
 import { resolveDecisionOwnerUserId } from "./decision-owner.js";
-import { issueService, listUnfinalizedExecutionWorkspaceIds } from "./issues.js";
+import { issueService, runWorkspaceIsFinalized } from "./issues.js";
 
 type InteractionActor = {
   agentId?: string | null;
@@ -553,7 +553,10 @@ export function issueThreadInteractionService(db: Db) {
   async function assertIssueWorkspaceFinalizedForAccept(args: {
     db: Pick<Db, "select">;
     issue: { id: string; companyId: string };
+    sourceRunId: string | null;
   }) {
+    if (!args.sourceRunId) return;
+
     const executionWorkspaceId = await args.db
       .select({ executionWorkspaceId: issues.executionWorkspaceId })
       .from(issues)
@@ -562,17 +565,18 @@ export function issueThreadInteractionService(db: Db) {
 
     if (!executionWorkspaceId) return;
 
-    const unfinalized = await listUnfinalizedExecutionWorkspaceIds(
+    const isFinalized = await runWorkspaceIsFinalized(
       args.db,
       args.issue.companyId,
-      [executionWorkspaceId],
+      executionWorkspaceId,
+      args.sourceRunId,
     );
-    if (!unfinalized.has(executionWorkspaceId)) return;
+    if (isFinalized) return;
 
     throw conflict(
-      "Cannot accept interaction: the issue's most recent run has not completed workspace_finalize. "
+      "Cannot accept interaction: the run that created this interaction has not finished syncing its workspace. "
         + "Retry once the local worktree has finished syncing.",
-      { executionWorkspaceId },
+      { executionWorkspaceId, sourceRunId: args.sourceRunId },
     );
   }
 
@@ -891,7 +895,7 @@ export function issueThreadInteractionService(db: Db) {
           // workspace_finalize gate (PAPA-440) does not apply here.
           return issueThreadInteractionService(db).acceptSuggestedTasks(issue, interactionId, data, actor);
         case "request_confirmation": {
-          await assertIssueWorkspaceFinalizedForAccept({ db, issue });
+          await assertIssueWorkspaceFinalizedForAccept({ db, issue, sourceRunId: current.sourceRunId });
           const accepted = await acceptRequestConfirmation({
             issue,
             current,
@@ -905,7 +909,7 @@ export function issueThreadInteractionService(db: Db) {
           };
         }
         case "request_checkbox_confirmation": {
-          await assertIssueWorkspaceFinalizedForAccept({ db, issue });
+          await assertIssueWorkspaceFinalizedForAccept({ db, issue, sourceRunId: current.sourceRunId });
           const accepted = await acceptRequestConfirmation({
             issue,
             current,
