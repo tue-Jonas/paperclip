@@ -9,6 +9,7 @@ import {
   agentTaskSessions,
   agentWakeupRequests,
   activityLog,
+  companies,
   costEvents,
   heartbeatRunEvents,
   heartbeatRuns,
@@ -79,6 +80,12 @@ interface AgentShortnameCollisionOptions {
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasExplicitCwd(adapterConfig: unknown): boolean {
+  if (!isPlainRecord(adapterConfig)) return false;
+  const cwd = adapterConfig.cwd;
+  return typeof cwd === "string" && cwd.trim().length > 0;
 }
 
 function jsonEqual(left: unknown, right: unknown): boolean {
@@ -340,6 +347,26 @@ export function agentService(db: Db) {
     return manager;
   }
 
+  async function resolveCompanyDefaultAgentCwd(companyId: string): Promise<string | null> {
+    const row = await db
+      .select({ defaultAgentCwd: companies.defaultAgentCwd })
+      .from(companies)
+      .where(eq(companies.id, companyId))
+      .then((rows) => rows[0] ?? null);
+    const value = row?.defaultAgentCwd;
+    return typeof value === "string" && value.trim().length > 0 ? value : null;
+  }
+
+  async function applyCompanyDefaultAgentCwd(
+    companyId: string,
+    adapterConfig: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    if (hasExplicitCwd(adapterConfig)) return adapterConfig;
+    const defaultCwd = await resolveCompanyDefaultAgentCwd(companyId);
+    if (!defaultCwd) return adapterConfig;
+    return { ...adapterConfig, cwd: defaultCwd };
+  }
+
   async function assertNoCycle(agentId: string, reportsTo: string | null | undefined) {
     if (!reportsTo) return;
     if (reportsTo === agentId) throw unprocessable("Agent cannot report to itself");
@@ -516,9 +543,13 @@ export function agentService(db: Db) {
       const normalizedPermissions = normalizeAgentPermissions(data.permissions, role);
       const runtimeConfig = normalizeRuntimeConfigForNewAgent(data.runtimeConfig);
       const adapterType = data.adapterType ?? "process";
-      const adapterConfig = isPlainRecord(data.adapterConfig)
+      const normalizedAdapterConfig = isPlainRecord(data.adapterConfig)
         ? await secretsSvc.normalizeAdapterConfigForPersistence(companyId, data.adapterConfig, { adapterType })
         : {};
+      // Inherit the company default workspace into adapterConfig.cwd when the new
+      // agent has no explicit cwd. Explicit cwd values (e.g. pilot/sandbox agents)
+      // are preserved as-is, so they remain documented exceptions.
+      const adapterConfig = await applyCompanyDefaultAgentCwd(companyId, normalizedAdapterConfig);
       return db.transaction(async (tx) => {
         const txDb = tx as unknown as Db;
         const created = await tx

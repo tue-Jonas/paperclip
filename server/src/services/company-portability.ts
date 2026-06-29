@@ -1920,6 +1920,7 @@ const YAML_KEY_PRIORITY = [
   "icon",
   "capabilities",
   "brandColor",
+  "defaultAgentCwd",
   "logoPath",
   "adapter",
   "runtime",
@@ -2642,6 +2643,7 @@ function buildManifestFromPackageFiles(
       name: companyName,
       description: asString(companyFrontmatter.description),
       brandColor: asString(paperclipCompany.brandColor),
+      defaultAgentCwd: asString(paperclipCompany.defaultAgentCwd) ?? null,
       logoPath: asString(paperclipCompany.logoPath) ?? asString(paperclipCompany.logo),
       attachmentMaxBytes:
         typeof paperclipCompany.attachmentMaxBytes === "number" && Number.isFinite(paperclipCompany.attachmentMaxBytes)
@@ -3764,6 +3766,7 @@ export function companyPortabilityService(db: Db, storage?: StorageService) {
         schema: "paperclip/v1",
         company: stripEmptyValues({
           brandColor: company.brandColor ?? null,
+          defaultAgentCwd: company.defaultAgentCwd ?? null,
           logoPath: companyLogoPath,
           attachmentMaxBytes: company.attachmentMaxBytes,
           requireBoardApprovalForNewAgents: company.requireBoardApprovalForNewAgents ? true : undefined,
@@ -4325,6 +4328,7 @@ export function companyPortabilityService(db: Db, storage?: StorageService) {
         name: companyName,
         description: include.company ? (sourceManifest.company?.description ?? null) : null,
         brandColor: include.company ? (sourceManifest.company?.brandColor ?? null) : null,
+        defaultAgentCwd: include.company ? (sourceManifest.company?.defaultAgentCwd ?? null) : null,
         attachmentMaxBytes: include.company
           ? (sourceManifest.company?.attachmentMaxBytes ?? undefined)
           : undefined,
@@ -4366,6 +4370,7 @@ export function companyPortabilityService(db: Db, storage?: StorageService) {
           name: sourceManifest.company.name,
           description: sourceManifest.company.description,
           brandColor: sourceManifest.company.brandColor,
+          defaultAgentCwd: sourceManifest.company.defaultAgentCwd ?? null,
           attachmentMaxBytes: sourceManifest.company.attachmentMaxBytes ?? undefined,
           requireBoardApprovalForNewAgents: sourceManifest.company.requireBoardApprovalForNewAgents,
           feedbackDataSharingEnabled: sourceManifest.company.feedbackDataSharingEnabled,

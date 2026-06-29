@@ -39,6 +39,7 @@ export function CompanySettings() {
   const [description, setDescription] = useState("");
   const [brandColor, setBrandColor] = useState("");
   const [attachmentMaxMiB, setAttachmentMaxMiB] = useState(String(DEFAULT_COMPANY_ATTACHMENT_MAX_MIB));
+  const [defaultAgentCwd, setDefaultAgentCwd] = useState("");
   const [logoUrl, setLogoUrl] = useState("");
   const [logoUploadError, setLogoUploadError] = useState<string | null>(null);
 
@@ -49,6 +50,7 @@ export function CompanySettings() {
     setDescription(selectedCompany.description ?? "");
     setBrandColor(selectedCompany.brandColor ?? "");
     setAttachmentMaxMiB(String(Math.round((selectedCompany.attachmentMaxBytes ?? DEFAULT_COMPANY_ATTACHMENT_MAX_BYTES) / BYTES_PER_MIB)));
+    setDefaultAgentCwd(selectedCompany.defaultAgentCwd ?? "");
     setLogoUrl(selectedCompany.logoUrl ?? "");
   }, [selectedCompany]);
 
@@ -59,11 +61,15 @@ export function CompanySettings() {
     && attachmentMaxBytes <= MAX_COMPANY_ATTACHMENT_MAX_BYTES;
   const cloudSyncEnabled = experimentalSettings?.enableCloudSync === true;
 
+  const normalizedDefaultAgentCwd = defaultAgentCwd.trim();
+  const defaultAgentCwdValid = normalizedDefaultAgentCwd === "" || normalizedDefaultAgentCwd.startsWith("/");
+
   const generalDirty =
     !!selectedCompany &&
     (companyName !== selectedCompany.name ||
       description !== (selectedCompany.description ?? "") ||
       brandColor !== (selectedCompany.brandColor ?? "") ||
+      normalizedDefaultAgentCwd !== (selectedCompany.defaultAgentCwd ?? "") ||
       attachmentMaxBytes !== (selectedCompany.attachmentMaxBytes ?? DEFAULT_COMPANY_ATTACHMENT_MAX_BYTES));
 
   const generalMutation = useMutation({
@@ -71,6 +77,7 @@ export function CompanySettings() {
       name: string;
       description: string | null;
       brandColor: string | null;
+      defaultAgentCwd: string | null;
       attachmentMaxBytes: number;
     }) => companiesApi.update(selectedCompanyId!, data),
     onSuccess: () => {
@@ -165,6 +172,7 @@ export function CompanySettings() {
       name: companyName.trim(),
       description: description.trim() || null,
       brandColor: brandColor || null,
+      defaultAgentCwd: normalizedDefaultAgentCwd || null,
       attachmentMaxBytes
     });
   }
@@ -321,6 +329,27 @@ export function CompanySettings() {
                   )}
                 </div>
               </Field>
+              <Field
+                label="Default agent workspace"
+                hint="Absolute path applied as the working directory for newly created or hired agents. Existing agents and agents created with an explicit working directory keep their own. Leave empty for no default."
+              >
+                <div className="flex flex-col gap-1.5">
+                  <input
+                    type="text"
+                    value={defaultAgentCwd}
+                    placeholder="/home/tj/workbench"
+                    spellCheck={false}
+                    onChange={(e) => setDefaultAgentCwd(e.target.value)}
+                    className="w-full rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm outline-none font-mono"
+                    data-testid="company-settings-default-agent-cwd"
+                  />
+                  {!defaultAgentCwdValid && (
+                    <span className="text-xs text-destructive">
+                      Must be an absolute path (start with /).
+                    </span>
+                  )}
+                </div>
+              </Field>
             </div>
           </div>
         </div>
@@ -332,7 +361,7 @@ export function CompanySettings() {
           <Button
             size="sm"
             onClick={handleSaveGeneral}
-            disabled={generalMutation.isPending || !companyName.trim() || !attachmentMaxValid}
+            disabled={generalMutation.isPending || !companyName.trim() || !attachmentMaxValid || !defaultAgentCwdValid}
           >
             {generalMutation.isPending ? "Saving..." : "Save changes"}
           </Button>
