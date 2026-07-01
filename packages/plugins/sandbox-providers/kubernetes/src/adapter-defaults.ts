@@ -22,12 +22,6 @@ const REGISTRY: Record<string, AdapterDefaults> = {
     allowFqdns: ["api.openai.com"],
     probeCommand: ["codex", "--version"],
   },
-  gemini_local: {
-    runtimeImage: "ghcr.io/paperclipai/agent-runtime-gemini:v1",
-    envKeys: ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
-    allowFqdns: ["generativelanguage.googleapis.com"],
-    probeCommand: ["gemini", "--version"],
-  },
   cursor_local: {
     runtimeImage: "ghcr.io/paperclipai/agent-runtime-cursor:v1",
     envKeys: ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"],

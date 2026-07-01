@@ -233,7 +233,7 @@ const HEARTBEAT_MAX_CONCURRENT_RUNS_MIN = 1;
 const HEARTBEAT_MAX_CONCURRENT_RUNS_MAX = 50;
 // Host-global cap on concurrently-executing heartbeat runs across ALL agents and
 // companies (TUE-13 overload protection). Each running heartbeat run is one heavy
-// adapter CLI process (claude/gemini/codex) inside paperclip.service's cgroup; a
+// adapter CLI process (claude/codex) inside paperclip.service's cgroup; a
 // single 1M-context Claude run can use 10-12 GiB RSS, so an unbounded multi-company
 // wake-wave OOMs the 15 GiB host (TUE-12 forensics). The per-agent
 // heartbeat.maxConcurrentRuns does NOT bound cross-agent concurrency, so this is the
@@ -318,7 +318,6 @@ const GIT_SENSITIVE_LOCAL_ADAPTER_TYPES = new Set([
   "claude_local",
   "codex_local",
   "cursor",
-  "gemini_local",
   "grok_local",
   "hermes_local",
   "opencode_local",
@@ -459,7 +458,6 @@ const SESSIONED_LOCAL_ADAPTERS = new Set([
   "claude_local",
   "codex_local",
   "cursor",
-  "gemini_local",
   "hermes_local",
   "opencode_local",
   "pi_local",

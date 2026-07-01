@@ -423,7 +423,7 @@ describe("environmentRunOrchestrator — realizeForRun", () => {
   it("runs project-level provision commands for ssh environments", async () => {
     mockBuildWorkspaceRealizationRequest.mockReturnValue({
       version: 1,
-      adapterType: "gemini_local",
+      adapterType: "opencode_local",
       companyId: "company-1",
       environmentId: "env-1",
       executionWorkspaceId: null,
@@ -442,7 +442,7 @@ describe("environmentRunOrchestrator — realizeForRun", () => {
         worktreePath: null,
       },
       runtimeOverlay: {
-        provisionCommand: "npm install -g @google/gemini-cli",
+        provisionCommand: "npm install -g opencode-ai",
       },
     });
     mockResolveEnvironmentExecutionTarget.mockResolvedValue({
@@ -494,7 +494,7 @@ describe("environmentRunOrchestrator — realizeForRun", () => {
 
     expect(runtime.execute).toHaveBeenCalledWith(expect.objectContaining({
       command: "bash",
-      args: ["-lc", "npm install -g @google/gemini-cli"],
+      args: ["-lc", "npm install -g opencode-ai"],
     }));
     expect(mockResolveEnvironmentExecutionTarget).toHaveBeenCalledOnce();
   });
