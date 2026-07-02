@@ -5,6 +5,7 @@ import {
   createDocumentAnnotationCommentSchema,
   createDocumentAnnotationThreadSchema,
   createRoutineTriggerSchema,
+  isUuidLike,
   rotateRoutineTriggerSecretSchema,
   runRoutineSchema,
   updateDocumentAnnotationThreadSchema,
@@ -189,6 +190,10 @@ export function routineRoutes(
   });
 
   router.get("/routines/:id", async (req, res) => {
+    if (!isUuidLike(req.params.id as string)) {
+      res.status(400).json({ error: "Invalid routine id" });
+      return;
+    }
     const detail = await svc.getDetail(req.params.id as string);
     if (!detail) {
       res.status(404).json({ error: "Routine not found" });
@@ -450,6 +455,10 @@ export function routineRoutes(
   });
 
   router.get("/routines/:id/runs", async (req, res) => {
+    if (!isUuidLike(req.params.id as string)) {
+      res.status(400).json({ error: "Invalid routine id" });
+      return;
+    }
     const routine = await svc.get(req.params.id as string);
     if (!routine) {
       res.status(404).json({ error: "Routine not found" });
