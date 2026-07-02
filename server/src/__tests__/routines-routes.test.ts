@@ -341,6 +341,39 @@ describe("routine routes", () => {
     expect(res.body[0]).toMatchObject({ id: revisionId, revisionNumber: 1 });
   });
 
+  it("rejects malformed routine ids before listing runs", async () => {
+    const app = await createApp({
+      type: "board",
+      userId: "board-user",
+      source: "session",
+      isInstanceAdmin: true,
+      companyIds: [companyId],
+    });
+
+    const res = await request(app).get("/api/routines/6dba0ccf/runs");
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("Invalid routine id");
+    expect(mockRoutineService.get).not.toHaveBeenCalled();
+    expect(mockRoutineService.listRuns).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed routine ids before reading routine detail", async () => {
+    const app = await createApp({
+      type: "board",
+      userId: "board-user",
+      source: "session",
+      isInstanceAdmin: true,
+      companyIds: [companyId],
+    });
+
+    const res = await request(app).get("/api/routines/6dba0ccf");
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("Invalid routine id");
+    expect(mockRoutineService.getDetail).not.toHaveBeenCalled();
+  });
+
   it("creates, replies to, and resolves routine description annotation threads", async () => {
     const app = await createApp({
       type: "board",

@@ -47,6 +47,7 @@ import {
   getBuiltinRoutineVariableValues,
   extractRoutineVariableNames,
   interpolateRoutineTemplate,
+  isUuidLike,
   isValidRoutineDateString,
   pluginOperationIssueOriginKind,
   stringifyRoutineVariableValue,
@@ -564,6 +565,11 @@ export function routineService(
   });
 
   async function getRoutineById(id: string) {
+    // Routine ids are UUIDs. Short ids (e.g. the 8-char prefix used in some
+    // links/health probes) would otherwise reach Postgres and blow up with
+    // `invalid input syntax for type uuid`, surfacing as a 500. Treat any
+    // non-UUID id as "not found" so callers return a clean 404.
+    if (!isUuidLike(id)) return null;
     return db
       .select()
       .from(routines)
