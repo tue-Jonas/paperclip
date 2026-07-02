@@ -70,18 +70,6 @@ import {
 } from "@paperclipai/adapter-cursor-cloud/server";
 import { agentConfigurationDoc as cursorCloudAgentConfigurationDoc } from "@paperclipai/adapter-cursor-cloud";
 import {
-  execute as geminiExecute,
-  listGeminiSkills,
-  syncGeminiSkills,
-  testEnvironment as geminiTestEnvironment,
-  sessionCodec as geminiSessionCodec,
-} from "@paperclipai/adapter-gemini-local/server";
-import {
-  agentConfigurationDoc as geminiAgentConfigurationDoc,
-  models as geminiModels,
-  modelProfiles as geminiModelProfiles,
-} from "@paperclipai/adapter-gemini-local";
-import {
   execute as grokExecute,
   listGrokSkills,
   syncGrokSkills,
@@ -307,25 +295,6 @@ const cursorCloudAdapter: ServerAdapterModule = {
   getConfigSchema: getCursorCloudConfigSchema,
 };
 
-const geminiLocalAdapter: ServerAdapterModule = {
-  type: "gemini_local",
-  execute: geminiExecute,
-  testEnvironment: geminiTestEnvironment,
-  listSkills: listGeminiSkills,
-  syncSkills: syncGeminiSkills,
-  sessionCodec: geminiSessionCodec,
-  sessionManagement: getAdapterSessionManagement("gemini_local") ?? undefined,
-  models: geminiModels,
-  modelProfiles: geminiModelProfiles,
-  supportsLocalAgentJwt: true,
-  supportsInstructionsBundle: true,
-  instructionsPathKey: "instructionsFilePath",
-  requiresMaterializedRuntimeSkills: true,
-  getRuntimeCommandSpec: (config) =>
-    buildNpmRuntimeCommandSpec(config, "gemini", "@google/gemini-cli"),
-  agentConfigurationDoc: geminiAgentConfigurationDoc,
-};
-
 const grokLocalAdapter: ServerAdapterModule = {
   type: "grok_local",
   execute: grokExecute,
@@ -421,7 +390,6 @@ function registerBuiltInAdapters() {
     piLocalAdapter,
     cursorCloudAdapter,
     cursorLocalAdapter,
-    geminiLocalAdapter,
     grokLocalAdapter,
     hermesGatewayAdapter,
     hermesLocalAdapter,

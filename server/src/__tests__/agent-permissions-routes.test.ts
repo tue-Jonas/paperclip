@@ -1356,7 +1356,6 @@ describe.sequential("agent permission routes", () => {
   const sshCapableAdapterCases = [
     { adapterType: "codex_local", name: "Codex Builder", adapterConfig: {} },
     { adapterType: "claude_local", name: "Claude Builder", adapterConfig: {} },
-    { adapterType: "gemini_local", name: "Gemini Builder", adapterConfig: {} },
     { adapterType: "opencode_local", name: "OpenCode Builder", adapterConfig: { model: "opencode/gpt-5-nano" } },
     { adapterType: "cursor", name: "Cursor Builder", adapterConfig: {} },
     { adapterType: "pi_local", name: "Pi Builder", adapterConfig: { model: "openai/gpt-5.4-mini" } },

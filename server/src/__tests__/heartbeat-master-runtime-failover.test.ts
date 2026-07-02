@@ -50,13 +50,13 @@ describe("master runtime failover", () => {
 
   it("does not rewrite non-master adapters", () => {
     expect(resolveMasterRuntimeAdapter({
-      adapterType: "gemini_local",
+      adapterType: "opencode_local",
       settings: settings({ claudeLimitedUntil: future }),
       now,
     })).toMatchObject({
       sourceRuntime: null,
       targetRuntime: null,
-      adapterType: "gemini_local",
+      adapterType: "opencode_local",
       blocked: false,
     });
   });
@@ -114,7 +114,7 @@ describe("master runtime failover", () => {
   });
 
   it("does not classify ordinary non-master or generic failures as hard master limits", () => {
-    expect(isHardMasterRuntimeLimitResult("gemini_local", {
+    expect(isHardMasterRuntimeLimitResult("opencode_local", {
       exitCode: 1,
       signal: null,
       timedOut: false,

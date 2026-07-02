@@ -158,7 +158,7 @@ const manifest: PaperclipPluginManifestV1 = {
       icon: "book-open",
       capabilities: "Ingests source material, maintains local wiki pages, answers cited questions, and runs wiki lint/maintenance through plugin tools.",
       adapterType: "claude_local",
-      adapterPreference: ["claude_local", "codex_local", "gemini_local", "opencode_local", "cursor", "pi_local"],
+      adapterPreference: ["claude_local", "codex_local", "opencode_local", "cursor", "pi_local"],
       adapterConfig: {
         dangerouslySkipPermissions: false,
         dangerouslyBypassApprovalsAndSandbox: false,

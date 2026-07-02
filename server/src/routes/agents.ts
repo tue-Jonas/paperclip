@@ -91,7 +91,6 @@ import {
 } from "@paperclipai/adapter-acpx-local";
 import { DEFAULT_CODEX_LOCAL_BYPASS_APPROVALS_AND_SANDBOX } from "@paperclipai/adapter-codex-local";
 import { DEFAULT_CURSOR_LOCAL_MODEL } from "@paperclipai/adapter-cursor-local";
-import { DEFAULT_GEMINI_LOCAL_MODEL } from "@paperclipai/adapter-gemini-local";
 import { DEFAULT_OPENCODE_LOCAL_MODEL } from "@paperclipai/adapter-opencode-local";
 import { requireOpenCodeModelId } from "@paperclipai/adapter-opencode-local/server";
 import {
@@ -140,7 +139,6 @@ export function agentRoutes(
     claude_local: "instructionsFilePath",
     codex_local: "instructionsFilePath",
     droid_local: "instructionsFilePath",
-    gemini_local: "instructionsFilePath",
     opencode_local: "instructionsFilePath",
     cursor: "instructionsFilePath",
     pi_local: "instructionsFilePath",
@@ -1212,10 +1210,6 @@ export function agentRoutes(
       }
       return ensureGatewayDeviceKey(adapterType, next);
     }
-    if (adapterType === "gemini_local" && !asNonEmptyString(next.model)) {
-      next.model = DEFAULT_GEMINI_LOCAL_MODEL;
-      return ensureGatewayDeviceKey(adapterType, next);
-    }
     if (adapterType === "opencode_local" && !asNonEmptyString(next.model)) {
       next.model = DEFAULT_OPENCODE_LOCAL_MODEL;
       return ensureGatewayDeviceKey(adapterType, next);
@@ -1410,7 +1404,6 @@ export function agentRoutes(
   // declare requiresMaterializedRuntimeSkills explicitly.
   const LEGACY_MATERIALIZED_SKILLS_SET = new Set([
     "cursor",
-    "gemini_local",
     "opencode_local",
     "pi_local",
   ]);

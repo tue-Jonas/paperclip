@@ -11,7 +11,6 @@ describe("heartbeat stop metadata", () => {
       "codex_local",
       "claude_local",
       "cursor",
-      "gemini_local",
       "opencode_local",
       "pi_local",
       "process",
