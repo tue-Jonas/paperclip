@@ -147,6 +147,18 @@ describe("parseGeminiJsonl", () => {
 
     expect(result.requiresAuth).toBe(true);
   });
+
+  it("classifies the dead free-tier client (IneligibleTierError / UNSUPPORTED_CLIENT) as auth required", () => {
+    // Exact captured stderr (TWB-2094): benign YOLO banner first, real auth death after.
+    const stderr = [
+      "YOLO mode is enabled. All tool calls will be automatically approved.",
+      "Error authenticating: IneligibleTierError: This client is no longer supported for Gemini Code Assist for individuals. Please upgrade. [UNSUPPORTED_CLIENT]",
+    ].join("\n");
+
+    const result = detectGeminiAuthRequired({ parsed: null, stdout: "", stderr });
+
+    expect(result.requiresAuth).toBe(true);
+  });
 });
 
 describe("isGeminiSessionUnrecoverableError", () => {
