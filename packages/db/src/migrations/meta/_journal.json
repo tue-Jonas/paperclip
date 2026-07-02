@@ -911,6 +911,13 @@
       "when": 1782254700000,
       "tag": "0129_claude_account_usage",
       "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "7",
+      "when": 1782341100000,
+      "tag": "0130_claude_auth_switch_decision",
+      "breakpoints": true
     }
   ]
 }
